@@ -1,0 +1,49 @@
+import Link from 'next/link';
+
+const enlaces = [
+  { href: '/', etiqueta: 'Inicio' },
+  { href: '/gastos/nuevo', etiqueta: 'Nuevo gasto' },
+  { href: '/gastos', etiqueta: 'Gastos' },
+  { href: '/tarjetas', etiqueta: 'Tarjetas' },
+  { href: '/calendario', etiqueta: 'Calendario' },
+  { href: '/flujo', etiqueta: 'Flujo mensual' },
+  { href: '/configuracion/personas', etiqueta: 'Personas' },
+  { href: '/configuracion/categorias', etiqueta: 'Categorías' },
+  { href: '/configuracion/medios-pago', etiqueta: 'Medios de pago' },
+];
+
+export function NavegacionPrincipal() {
+  return (
+    <>
+      <aside className="hidden md:flex md:w-64 md:flex-col md:border-r md:border-slate-200 md:bg-white">
+        <div className="border-b border-slate-200 px-5 py-4">
+          <p className="text-lg font-semibold">ControlFlow</p>
+          <p className="text-sm text-slate-500">Control de gastos familiar</p>
+        </div>
+        <nav className="flex-1 space-y-1 p-3">
+          {enlaces.map((enlace) => (
+            <Link
+              key={enlace.href}
+              href={enlace.href}
+              className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              {enlace.etiqueta}
+            </Link>
+          ))}
+        </nav>
+      </aside>
+
+      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white p-2 md:hidden">
+        <ul className="grid grid-cols-5 gap-1 text-center text-xs">
+          {enlaces.slice(0, 5).map((enlace) => (
+            <li key={enlace.href}>
+              <Link href={enlace.href} className="block rounded-md px-1 py-2 text-slate-700 hover:bg-slate-100">
+                {enlace.etiqueta}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </>
+  );
+}
