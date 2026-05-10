@@ -73,3 +73,23 @@ OCR de facturas.
 ### Fase 6
 
 IA para conciliación automática.
+
+## Configuración de Supabase (Tarea 2)
+
+1. Crear un proyecto en Supabase.
+2. Copiar `.env.example` a `.env.local`.
+3. Completar las variables:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+```
+
+4. Reiniciar el servidor de desarrollo (`npm run dev`).
+
+### Archivos preparados
+
+- `lib/supabase/client.ts`: cliente Supabase para componentes cliente.
+- `lib/supabase/server.ts`: fábrica de cliente Supabase para uso en servidor.
+
+> Nota: En esta tarea solo se deja la conexión base lista. No se implementa Auth, RLS ni tablas.
