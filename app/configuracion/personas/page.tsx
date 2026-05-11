@@ -132,20 +132,30 @@ export default function Page() {
     await cargarPersonas();
   }
 
-  async function desactivarPersona(persona: Persona) {
+  async function cambiarEstadoPersona(persona: Persona, proximoEstado: boolean) {
     setMensaje(null);
 
     const { error } = await supabase
       .from('personas')
-      .update({ activo: false, actualizado_en: new Date().toISOString() })
+      .update({ activo: proximoEstado, actualizado_en: new Date().toISOString() })
       .eq('id', persona.id);
 
     if (error) {
-      setMensaje({ tipo: 'error', texto: 'No se pudo desactivar la persona.' });
+      setMensaje({
+        tipo: 'error',
+        texto: proximoEstado
+          ? 'No se pudo reactivar la persona.'
+          : 'No se pudo desactivar la persona.',
+      });
       return;
     }
 
-    setMensaje({ tipo: 'ok', texto: `Persona ${persona.nombre} desactivada.` });
+    setMensaje({
+      tipo: 'ok',
+      texto: proximoEstado
+        ? `Persona ${persona.nombre} reactivada.`
+        : `Persona ${persona.nombre} desactivada.`,
+    });
     await cargarPersonas();
   }
 
@@ -306,11 +316,14 @@ export default function Page() {
                             </button>
                             <button
                               type="button"
-                              disabled={!persona.activo}
-                              onClick={() => desactivarPersona(persona)}
-                              className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              onClick={() => cambiarEstadoPersona(persona, !persona.activo)}
+                              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                                persona.activo
+                                  ? 'border-rose-200 text-rose-600 hover:bg-rose-50'
+                                  : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                              }`}
                             >
-                              Desactivar
+                              {persona.activo ? 'Desactivar' : 'Reactivar'}
                             </button>
                           </div>
                         </td>
@@ -349,11 +362,14 @@ export default function Page() {
                       </button>
                       <button
                         type="button"
-                        disabled={!persona.activo}
-                        onClick={() => desactivarPersona(persona)}
-                        className="flex-1 rounded-lg border border-rose-200 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => cambiarEstadoPersona(persona, !persona.activo)}
+                        className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium ${
+                          persona.activo
+                            ? 'border-rose-200 text-rose-600 hover:bg-rose-50'
+                            : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                        }`}
                       >
-                        Desactivar
+                        {persona.activo ? 'Desactivar' : 'Reactivar'}
                       </button>
                     </div>
                   </article>
