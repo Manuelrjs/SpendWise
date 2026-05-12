@@ -1,12 +1,12 @@
-# ControlFlow — Instrucciones para Codex
+# SpendWise — Instrucciones para Codex
 
 ## Nombre del proyecto
 
-ControlFlow
+SpendWise
 
 ## Objetivo
 
-ControlFlow es una aplicación web responsive para control de gastos familiares, tarjetas de crédito, cuotas y flujo mensual de pagos.
+SpendWise es una aplicación web responsive para control de gastos familiares, tarjetas de crédito, cuotas y flujo mensual de pagos.
 
 El sistema debe permitir registrar gastos de forma rápida, identificar quién gastó, con qué medio de pago, con qué cuenta de tarjeta y con qué tarjeta física/adicional. También debe proyectar cuánto dinero debe reservarse cada mes para pagar tarjetas.
 

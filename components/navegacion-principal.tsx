@@ -17,8 +17,8 @@ export function NavegacionPrincipal() {
     <>
       <aside className="hidden md:flex md:w-64 md:flex-col md:border-r md:border-slate-200 md:bg-white">
         <div className="border-b border-slate-200 px-5 py-4">
-          <p className="text-lg font-semibold">ControlFlow</p>
-          <p className="text-sm text-slate-500">Control de gastos familiar</p>
+          <p className="text-lg font-semibold">SpendWise</p>
+          <p className="text-sm text-slate-500">Control inteligente de gastos, tarjetas y pagos.</p>
         </div>
         <nav className="flex-1 space-y-1 p-3">
           {enlaces.map((enlace) => (
