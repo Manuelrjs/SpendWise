@@ -97,7 +97,7 @@ export default function Page() {
   async function cambiarEstadoTarjeta(t: TarjetaFisica, s: boolean) { const { error } = await supabase.from('tarjetas_fisicas').update({ activo: s, actualizado_en: new Date().toISOString() }).eq('id', t.id); if (error) return setMensaje({ tipo: 'error', texto: s ? 'No se pudo reactivar la tarjeta física.' : 'No se pudo desactivar la tarjeta física.' }); setMensaje({ tipo: 'ok', texto: s ? 'Tarjeta física reactivada.' : 'Tarjeta física desactivada.' }); await cargarDatos(); }
 
   return <section className="mx-auto max-w-[1440px] space-y-5 px-2 pb-6 md:px-4">
-    <header className="space-y-2"><p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">SpendWise</p><h1 className="text-2xl font-semibold">Tarjetas</h1><p className="text-sm text-slate-600">Gestioná cuentas y tarjetas físicas con una vista tipo board y menos scroll.</p></header>
+    <header className="space-y-2"><p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">SpendWise</p><h1 className="text-2xl font-semibold">Tarjetas</h1><p className="text-sm text-slate-600">Gestioná tus cuentas, tarjetas titulares y adicionales en un solo lugar.</p></header>
     {mensaje && <div className={`rounded-xl border px-4 py-3 text-sm ${mensaje.tipo === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{mensaje.texto}</div>}
 
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
