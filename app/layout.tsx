@@ -3,8 +3,8 @@ import './globals.css';
 import { NavegacionPrincipal } from '@/components/navegacion-principal';
 
 export const metadata: Metadata = {
-  title: 'ControlFlow',
-  description: 'Control de gastos familiares y tarjetas',
+  title: 'SpendWise',
+  description: 'Control inteligente de gastos, tarjetas y pagos.',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

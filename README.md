@@ -1,6 +1,6 @@
-# ControlFlow
+# SpendWise
 
-ControlFlow es una aplicación web responsive para control de gastos familiares, tarjetas de crédito, cuotas y flujo mensual de pagos.
+SpendWise es una aplicación web responsive para control de gastos familiares, tarjetas de crédito, cuotas y flujo mensual de pagos.
 
 ## Objetivo
 
