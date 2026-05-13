@@ -7,6 +7,7 @@ const enlaces = [
   { href: '/tarjetas', etiqueta: 'Tarjetas' },
   { href: '/calendario', etiqueta: 'Calendario' },
   { href: '/flujo', etiqueta: 'Flujo mensual' },
+  { href: '/cuotas-iniciales', etiqueta: 'Cuotas iniciales' },
   { href: '/configuracion/personas', etiqueta: 'Personas' },
   { href: '/configuracion/categorias', etiqueta: 'Categorías' },
   { href: '/configuracion/medios-pago', etiqueta: 'Medios de pago' },
@@ -34,8 +35,8 @@ export function NavegacionPrincipal() {
       </aside>
 
       <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white p-2 md:hidden">
-        <ul className="grid grid-cols-5 gap-1 text-center text-xs">
-          {enlaces.slice(0, 5).map((enlace) => (
+        <ul className="grid grid-cols-3 gap-1 text-center text-xs">
+          {enlaces.slice(0, 6).map((enlace) => (
             <li key={enlace.href}>
               <Link href={enlace.href} className="block rounded-md px-1 py-2 text-slate-700 hover:bg-slate-100">
                 {enlace.etiqueta}
