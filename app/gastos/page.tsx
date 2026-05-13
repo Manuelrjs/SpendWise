@@ -18,7 +18,7 @@ type Gasto = {
   tarjeta_fisica_id: string | null;
   cantidad_cuotas: number;
   estado_registro: 'borrador' | 'confirmado' | 'anulado';
-  created_at: string;
+  creado_en: string;
 };
 
 type OpcionBase = { id: string; nombre: string };
@@ -117,7 +117,7 @@ export default function Page() {
     const [g, c, m, p, ct, tf, cuotasRes] = await Promise.all([
       supabase
         .from('gastos')
-        .select('id,fecha_gasto,establecimiento,descripcion,observaciones,categoria_id,monto,moneda,medio_pago_id,persona_id,cuenta_tarjeta_id,tarjeta_fisica_id,cantidad_cuotas,estado_registro,created_at')
+        .select('id,fecha_gasto,establecimiento,descripcion,observaciones,categoria_id,monto,moneda,medio_pago_id,persona_id,cuenta_tarjeta_id,tarjeta_fisica_id,cantidad_cuotas,estado_registro,creado_en')
         .order('fecha_gasto', { ascending: false }),
       supabase.from('categorias').select('id,nombre').order('nombre'),
       supabase.from('medios_pago').select('id,nombre').order('nombre'),
@@ -128,6 +128,8 @@ export default function Page() {
     ]);
 
     if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error) {
+      const primerError = g.error ?? c.error ?? m.error ?? p.error ?? ct.error ?? tf.error ?? cuotasRes.error;
+      console.error(primerError);
       setError('No se pudieron cargar los gastos. Verificá la conexión con Supabase e intentá de nuevo.');
       setCargando(false);
       return;
@@ -221,6 +223,11 @@ export default function Page() {
 
       {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
       {cargando && <p className="rounded-xl border bg-white px-3 py-2 text-sm">Cargando gastos...</p>}
+
+
+      {!cargando && !error && gastosFiltrados.length === 0 && (
+        <p className="rounded-xl border bg-white px-3 py-2 text-sm">Todavía no hay gastos registrados.</p>
+      )}
 
       {!cargando && (
         <>
