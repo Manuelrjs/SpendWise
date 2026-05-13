@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase/client';
 type CuentaTarjeta = {
   id: string;
   nombre_cuenta: string;
-  activa: boolean;
+  activo: boolean;
 };
 
 type Persona = { id: string; nombre: string; apellido: string | null };
@@ -98,7 +98,7 @@ export default function FlujoPage() {
     setError(null);
 
     const [cuentasRes, personasRes, tarjetasRes, cuotasRes] = await Promise.all([
-      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,activa').eq('activa', true).order('nombre_cuenta'),
+      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,activo').eq('activo', true).order('nombre_cuenta'),
       supabase.from('personas').select('id,nombre,apellido').order('nombre'),
       supabase.from('tarjetas_fisicas').select('id,alias,tipo,ultimos_4_digitos').order('alias'),
       supabase
