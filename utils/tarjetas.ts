@@ -59,6 +59,47 @@ export function formatearPeriodoDesdeFecha(fecha: FechaEntrada): string {
   return `${anio}-${mes}`;
 }
 
+export function sumarMesesPeriodo(periodo: string, meses: number): string {
+  const [anioTexto, mesTexto] = periodo.split('-');
+  const anio = Number.parseInt(anioTexto, 10);
+  const mes = Number.parseInt(mesTexto, 10);
+
+  if (!anio || !mes) {
+    throw new Error(`Periodo inválido: ${periodo}.`);
+  }
+
+  const base = new Date(Date.UTC(anio, mes - 1 + meses, 1));
+  return `${base.getUTCFullYear()}-${String(base.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+export function obtenerUltimoDiaDelMes(periodo: string): number {
+  const [anioTexto, mesTexto] = periodo.split('-');
+  const anio = Number.parseInt(anioTexto, 10);
+  const mes = Number.parseInt(mesTexto, 10);
+
+  if (!anio || !mes) {
+    throw new Error(`Periodo inválido: ${periodo}.`);
+  }
+
+  return new Date(Date.UTC(anio, mes, 0)).getUTCDate();
+}
+
+export function construirFechaCierreEstimada(periodo: string, diaCierreHabitual: number): string {
+  const ultimoDia = obtenerUltimoDiaDelMes(periodo);
+  const diaCierre = Math.min(diaCierreHabitual, ultimoDia);
+  return `${periodo}-${String(diaCierre).padStart(2, '0')}`;
+}
+
+export function construirFechaVencimientoEstimada(
+  fechaCierre: FechaEntrada,
+  diasHastaVencimiento: number,
+): string {
+  const cierre = normalizarFecha(fechaCierre);
+  const vencimiento = new Date(cierre.getTime());
+  vencimiento.setUTCDate(vencimiento.getUTCDate() + diasHastaVencimiento);
+  return vencimiento.toISOString().slice(0, 10);
+}
+
 export function ordenarCalendariosPorCierre(
   calendarios: CalendarioTarjeta[],
 ): CalendarioTarjeta[] {
@@ -135,49 +176,3 @@ export function calcularPeriodoTarjeta(params: {
       : null,
   };
 }
-
-/*
-Ejemplos de uso rápido:
-
-const calendarios = [
-  {
-    id: 'cal-1',
-    cuenta_tarjeta_id: 'cta-1',
-    periodo_resumen: '2026-01',
-    fecha_cierre: '2026-01-29',
-    fecha_vencimiento: '2026-02-06',
-    estado_calendario: 'confirmado',
-    origen_fecha: 'manual',
-    observaciones: null,
-  },
-  {
-    id: 'cal-2',
-    cuenta_tarjeta_id: 'cta-1',
-    periodo_resumen: '2026-02',
-    fecha_cierre: '2026-02-27',
-    fecha_vencimiento: '2026-03-06',
-    estado_calendario: 'confirmado',
-    origen_fecha: 'manual',
-    observaciones: null,
-  },
-  {
-    id: 'cal-3',
-    cuenta_tarjeta_id: 'cta-1',
-    periodo_resumen: '2026-03',
-    fecha_cierre: '2026-03-31',
-    fecha_vencimiento: '2026-04-10',
-    estado_calendario: 'estimado',
-    origen_fecha: 'estimado_habitual',
-    observaciones: 'Pendiente confirmación del banco',
-  },
-];
-
-calcularPeriodoTarjeta({ fecha_gasto: '2026-01-28', cuenta_tarjeta_id: 'cta-1', calendarios });
-// => periodo_resumen: '2026-01', periodo_pago: '2026-02'
-
-calcularPeriodoTarjeta({ fecha_gasto: '2026-01-30', cuenta_tarjeta_id: 'cta-1', calendarios });
-// => periodo_resumen: '2026-02', periodo_pago: '2026-03'
-
-calcularPeriodoTarjeta({ fecha_gasto: '2026-03-31', cuenta_tarjeta_id: 'cta-1', calendarios });
-// => periodo_resumen: '2026-03', periodo_pago: '2026-04', es_estimado: true
-*/
