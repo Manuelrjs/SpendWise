@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 
 type CuentaTarjeta = {
@@ -48,6 +48,14 @@ const BADGE_ESTADO: Record<string, string> = {
   cancelada: 'bg-rose-50 text-rose-700 border-rose-200',
 };
 
+const BADGE_ORIGEN: Record<string, string> = {
+  gasto_nuevo: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  carga_inicial: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  importacion: 'bg-sky-50 text-sky-700 border-sky-200',
+  ajuste_manual: 'bg-amber-50 text-amber-700 border-amber-200',
+  conciliacion: 'bg-violet-50 text-violet-700 border-violet-200',
+};
+
 function sumarMeses(periodo: string, cantidad: number) {
   const [anioRaw, mesRaw] = periodo.split('-');
   const anio = Number(anioRaw);
@@ -80,6 +88,7 @@ export default function FlujoPage() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [celdaActiva, setCeldaActiva] = useState<{ cuentaTarjetaId: string; periodo: string } | null>(null);
+  const [mostrarDesglose, setMostrarDesglose] = useState(false);
 
   const [filtros, setFiltros] = useState<Filtros>({
     mesInicial: obtenerPeriodoActual(),
@@ -199,6 +208,27 @@ export default function FlujoPage() {
     );
   }, [celdaActiva, cuotasFiltradas]);
 
+  const cuotasPorCuentaYPeriodo = useMemo(() => {
+    const agrupadas = new Map<string, CuotaTarjeta[]>();
+    for (const cuota of cuotasFiltradas) {
+      const clave = `${cuota.cuenta_tarjeta_id}__${cuota.periodo_pago_estimado}`;
+      const previas = agrupadas.get(clave) ?? [];
+      previas.push(cuota);
+      agrupadas.set(clave, previas);
+    }
+    return agrupadas;
+  }, [cuotasFiltradas]);
+
+  const manejarClickCelda = (cuentaTarjetaId: string, periodo: string, monto: number) => {
+    if (monto <= 0) return;
+    setCeldaActiva((actual) => {
+      if (actual?.cuentaTarjetaId === cuentaTarjetaId && actual.periodo === periodo) {
+        return null;
+      }
+      return { cuentaTarjetaId, periodo };
+    });
+  };
+
   return (
     <section className="space-y-4">
       <header className="space-y-1">
@@ -233,6 +263,15 @@ export default function FlujoPage() {
           <option value="gasto_nuevo">gasto_nuevo</option><option value="carga_inicial">carga_inicial</option><option value="importacion">importacion</option><option value="ajuste_manual">ajuste_manual</option><option value="conciliacion">conciliacion</option>
         </select>
       </div>
+      <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-medium text-slate-700">
+        <input
+          type="checkbox"
+          checked={mostrarDesglose}
+          onChange={(e) => setMostrarDesglose(e.target.checked)}
+          className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+        />
+        Mostrar desglose de cuotas
+      </label>
 
       {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
       {cargando && <p className="rounded-xl border bg-white px-3 py-2 text-sm">Cargando flujo mensual...</p>}
@@ -255,19 +294,49 @@ export default function FlujoPage() {
               <tbody>
                 {cuentasVisibles.map((cuenta) => {
                   const totalCuenta = periodos.reduce((acc, periodo) => acc + (matriz.get(cuenta.id)?.get(periodo) ?? 0), 0);
+                  const filaExpandida = mostrarDesglose
+                    ? periodos.some((periodo) => (cuotasPorCuentaYPeriodo.get(`${cuenta.id}__${periodo}`)?.length ?? 0) > 0)
+                    : false;
                   return (
+                    <Fragment key={cuenta.id}>
                     <tr key={cuenta.id} className="border-t">
-                      <td className="px-3 py-2 font-medium">{cuenta.nombre_cuenta}</td>
-                      {periodos.map((periodo) => {
-                        const monto = matriz.get(cuenta.id)?.get(periodo) ?? 0;
-                        return (
-                          <td key={periodo} className="px-3 py-2 text-right">
-                            <button onClick={() => setCeldaActiva({ cuentaTarjetaId: cuenta.id, periodo })} className="rounded-lg px-2 py-1 hover:bg-slate-100" disabled={monto <= 0}>{monto > 0 ? formatearMonto(monto, 'ARS') : '—'}</button>
-                          </td>
-                        );
-                      })}
-                      <td className="px-3 py-2 text-right font-semibold">{formatearMonto(totalCuenta, 'ARS')}</td>
+                        <td className="px-3 py-2 font-medium">{cuenta.nombre_cuenta}</td>
+                        {periodos.map((periodo) => {
+                          const monto = matriz.get(cuenta.id)?.get(periodo) ?? 0;
+                          const activa = celdaActiva?.cuentaTarjetaId === cuenta.id && celdaActiva.periodo === periodo;
+                          return (
+                            <td key={periodo} className="px-3 py-2 text-right">
+                              <button
+                                onClick={() => manejarClickCelda(cuenta.id, periodo, monto)}
+                                className={`rounded-lg px-2 py-1 transition ${activa ? 'bg-emerald-100 text-emerald-900' : 'hover:bg-slate-100'}`}
+                                disabled={monto <= 0}
+                              >
+                                {monto > 0 ? formatearMonto(monto, 'ARS') : '—'}
+                              </button>
+                            </td>
+                          );
+                        })}
+                        <td className="px-3 py-2 text-right font-semibold">{formatearMonto(totalCuenta, 'ARS')}</td>
                     </tr>
+                      {filaExpandida && (
+                        <tr key={`${cuenta.id}-detalle`} className="border-t bg-slate-50/60">
+                          <td colSpan={periodos.length + 2} className="px-3 py-3">
+                            <div className="space-y-3">
+                              {periodos.map((periodo) => {
+                                const cuotasPeriodo = cuotasPorCuentaYPeriodo.get(`${cuenta.id}__${periodo}`) ?? [];
+                                if (cuotasPeriodo.length === 0) return null;
+                                return (
+                                  <div key={`${cuenta.id}-${periodo}`} className="rounded-xl border bg-white p-3">
+                                    <p className="mb-2 text-sm font-semibold">{periodo} · {formatearMonto(matriz.get(cuenta.id)?.get(periodo) ?? 0, 'ARS')}</p>
+                                    <DetalleCuotasLista cuotas={cuotasPeriodo} nombresPersonas={nombresPersonas} nombresTarjetas={nombresTarjetas} />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -288,9 +357,25 @@ export default function FlujoPage() {
                 <div className="mt-2 space-y-2">
                   {periodos.map((periodo) => {
                     const monto = matriz.get(cuenta.id)?.get(periodo) ?? 0;
-                    return <button key={periodo} onClick={() => monto > 0 && setCeldaActiva({ cuentaTarjetaId: cuenta.id, periodo })} className="flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm"><span>{periodo}</span><span className="font-semibold">{monto > 0 ? formatearMonto(monto, 'ARS') : '—'}</span></button>;
+                    return <button key={periodo} onClick={() => manejarClickCelda(cuenta.id, periodo, monto)} className="flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm"><span>{periodo}</span><span className="font-semibold">{monto > 0 ? formatearMonto(monto, 'ARS') : '—'}</span></button>;
                   })}
                 </div>
+                {mostrarDesglose && (
+                  <div className="mt-3 space-y-3">
+                    {periodos.map((periodo) => {
+                      const cuotasPeriodo = cuotasPorCuentaYPeriodo.get(`${cuenta.id}__${periodo}`) ?? [];
+                      if (cuotasPeriodo.length === 0) return null;
+                      return (
+                        <section key={`${cuenta.id}-${periodo}`} className="rounded-xl border bg-slate-50 p-2">
+                          <p className="text-xs font-semibold">{periodo} · {formatearMonto(matriz.get(cuenta.id)?.get(periodo) ?? 0, 'ARS')}</p>
+                          <div className="mt-2">
+                            <DetalleCuotasLista cuotas={cuotasPeriodo} nombresPersonas={nombresPersonas} nombresTarjetas={nombresTarjetas} />
+                          </div>
+                        </section>
+                      );
+                    })}
+                  </div>
+                )}
               </article>
             ))}
           </div>
@@ -304,27 +389,41 @@ export default function FlujoPage() {
             <button onClick={() => setCeldaActiva(null)} className="rounded-lg border px-2 py-1 text-xs">Cerrar</button>
           </div>
           {detalleCelda.length === 0 ? <p className="text-sm text-slate-600">No hay cuotas para esta combinación.</p> : (
-            <div className="space-y-2">
-              {detalleCelda.map((cuota) => (
-                <article key={cuota.id} className="rounded-xl border p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-medium">{cuota.establecimiento}</p>
-                    <p className="font-semibold">{formatearMonto(cuota.monto_cuota, cuota.moneda)}</p>
-                  </div>
-                  <p className="text-sm text-slate-600">{cuota.descripcion_cuota ?? 'Sin descripción'} · {cuota.numero_cuota}/{cuota.total_cuotas}</p>
-                  <p className="text-sm text-slate-600">Persona: {cuota.persona_id ? nombresPersonas.get(cuota.persona_id) ?? 'Sin persona' : 'Sin persona'} · Tarjeta: {cuota.tarjeta_fisica_id ? nombresTarjetas.get(cuota.tarjeta_fisica_id) ?? 'Sin tarjeta' : 'Sin tarjeta'}</p>
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                    <span className="rounded-full border bg-slate-50 px-2 py-1">origen: {cuota.origen_cuota}</span>
-                    <span className={`rounded-full border px-2 py-1 ${BADGE_ESTADO[cuota.estado] ?? 'bg-slate-50 text-slate-700 border-slate-200'}`}>{cuota.estado}</span>
-                  </div>
-                  {cuota.observaciones && <p className="mt-2 text-xs text-slate-500">Obs: {cuota.observaciones}</p>}
-                </article>
-              ))}
-            </div>
+            <DetalleCuotasLista cuotas={detalleCelda} nombresPersonas={nombresPersonas} nombresTarjetas={nombresTarjetas} />
           )}
         </section>
       )}
     </section>
+  );
+}
+
+function DetalleCuotasLista({
+  cuotas,
+  nombresPersonas,
+  nombresTarjetas,
+}: {
+  cuotas: CuotaTarjeta[];
+  nombresPersonas: Map<string, string>;
+  nombresTarjetas: Map<string, string>;
+}) {
+  return (
+    <div className="space-y-2">
+      {cuotas.map((cuota) => (
+        <article key={cuota.id} className="rounded-xl border p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-medium">{cuota.establecimiento}</p>
+            <p className="text-right font-semibold tabular-nums">{formatearMonto(cuota.monto_cuota, cuota.moneda)}</p>
+          </div>
+          <p className="text-sm text-slate-600">{cuota.descripcion_cuota ?? 'Sin descripción'} · {cuota.numero_cuota}/{cuota.total_cuotas}</p>
+          <p className="text-sm text-slate-600">Persona: {cuota.persona_id ? nombresPersonas.get(cuota.persona_id) ?? 'Sin persona' : 'Sin persona'} · Tarjeta: {cuota.tarjeta_fisica_id ? nombresTarjetas.get(cuota.tarjeta_fisica_id) ?? 'Sin tarjeta' : 'Sin tarjeta'}</p>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+            <span className={`rounded-full border px-2 py-1 ${BADGE_ORIGEN[cuota.origen_cuota] ?? 'bg-slate-50 text-slate-700 border-slate-200'}`}>origen: {cuota.origen_cuota}</span>
+            <span className={`rounded-full border px-2 py-1 ${BADGE_ESTADO[cuota.estado] ?? 'bg-slate-50 text-slate-700 border-slate-200'}`}>{cuota.estado}</span>
+          </div>
+          {cuota.observaciones && <p className="mt-2 text-xs text-slate-500">Obs: {cuota.observaciones}</p>}
+        </article>
+      ))}
+    </div>
   );
 }
 
