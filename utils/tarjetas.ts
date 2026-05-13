@@ -129,7 +129,7 @@ export function calcularPeriodoTarjeta(params: {
     calendario_id: calendarioSeleccionado.id,
     estado_calendario: calendarioSeleccionado.estado_calendario,
     origen_fecha: calendarioSeleccionado.origen_fecha,
-    es_estimado,
+    es_estimado: esEstimado,
     advertencia: esEstimado
       ? 'Se usó un calendario no confirmado; verificar cierre y vencimiento.'
       : null,

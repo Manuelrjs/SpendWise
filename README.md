@@ -93,3 +93,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 - `lib/supabase/server.ts`: fábrica de cliente Supabase para uso en servidor.
 
 > Nota: En esta tarea solo se deja la conexión base lista. No se implementa Auth, RLS ni tablas.
+
+## Validaciones manuales
+
+- Validación manual de cálculo de período de tarjeta: `node --experimental-strip-types scripts/probar-calculo-periodo.ts`.
