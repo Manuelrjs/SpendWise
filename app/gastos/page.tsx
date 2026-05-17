@@ -47,6 +47,7 @@ type CuotaTarjeta = {
   tarjeta_fisica_id: string | null;
   cuenta_tarjeta_id: string;
   observaciones: string | null;
+  motivo_modificacion?: string | null;
 };
 
 type Filtros = {
@@ -101,6 +102,7 @@ export default function Page() {
   }, new Map<string, number>()), [cuotas]);
 
   const cuotasGastoEditando = useMemo(() => gastoEditando ? cuotas.filter((c) => c.gasto_id === gastoEditando.id) : [], [cuotas, gastoEditando]);
+  const gastoEditandoTieneCuotas = cuotasGastoEditando.length > 0;
 
   const gastosFiltrados = useMemo(() => gastos.filter((gasto) => {
     if (filtros.estado_registro === 'activos' && gasto.estado_registro === 'anulado') return false;
@@ -122,6 +124,7 @@ export default function Page() {
   const totalAnulado = gastosFiltrados.filter((g) => g.estado_registro === 'anulado').reduce((acc, g) => acc + g.monto, 0);
 
   const esMedioTarjetaCredito = (medioId: string) => (nombresMedioPago.get(medioId) ?? '').toLowerCase().includes('tarjeta') && (nombresMedioPago.get(medioId) ?? '').toLowerCase().includes('cr');
+  const gastoEditandoEsTarjeta = gastoEditando ? esMedioTarjetaCredito(gastoEditando.medio_pago_id) : false;
 
   const tarjetasDisponiblesEdicion = useMemo(() => {
     if (!gastoEditando?.cuenta_tarjeta_id) return [];
@@ -138,7 +141,7 @@ export default function Page() {
       supabase.from('personas').select('id,nombre,apellido').order('nombre'),
       supabase.from('cuentas_tarjeta').select('id,nombre_cuenta').order('nombre_cuenta'),
       supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,tipo,nombre_en_tarjeta,alias,ultimos_4_digitos,activo').order('id'),
-      supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones')
+      supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,motivo_modificacion')
     ]);
     if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error) return setError('No se pudieron cargar los datos de gastos.');
     setGastos((g.data ?? []) as Gasto[]); setCategorias((c.data ?? []) as OpcionBase[]); setMediosPago((m.data ?? []) as OpcionBase[]); setPersonas((p.data ?? []) as Persona[]); setCuentasTarjeta((ct.data ?? []) as CuentaTarjeta[]); setTarjetasFisicas((tf.data ?? []) as TarjetaFisica[]); setCuotas((cuotasRes.data ?? []) as CuotaTarjeta[]);
@@ -153,14 +156,14 @@ export default function Page() {
     const originalTarjeta = esMedioTarjetaCredito(original.medio_pago_id);
     const nuevoTarjeta = esMedioTarjetaCredito(gastoEditando.medio_pago_id);
 
+    if (tieneCuotas && original.medio_pago_id !== gastoEditando.medio_pago_id) return setError('Este gasto tiene cuotas generadas. Para cambiar el medio de pago, anulá el gasto y cargalo nuevamente.');
     if (!originalTarjeta && nuevoTarjeta) return setError('Para convertir este gasto a tarjeta de crédito y generar cuotas, anulá este gasto y cargalo nuevamente desde Nuevo gasto.');
-    if (originalTarjeta && !nuevoTarjeta && tieneCuotas) return setError('Este gasto tiene cuotas generadas. Para cambiar el medio de pago, anulá el gasto y cargalo nuevamente.');
     if (tieneCuotas && original.cuenta_tarjeta_id !== gastoEditando.cuenta_tarjeta_id) return setError('Para cambiar la cuenta de tarjeta de un gasto con cuotas, anulá el gasto y cargalo nuevamente.');
-    if (nuevoTarjeta && (!gastoEditando.cuenta_tarjeta_id || !gastoEditando.tarjeta_fisica_id)) return setError('Para gastos con tarjeta de crédito, cuenta de tarjeta y tarjeta física son obligatorias.');
+    if (nuevoTarjeta && (!gastoEditando.cuenta_tarjeta_id || !gastoEditando.tarjeta_fisica_id)) return setError('Para un gasto con tarjeta de crédito, debés seleccionar cuenta de tarjeta y tarjeta física.');
 
     const payload = {
       establecimiento: gastoEditando.establecimiento.trim(), categoria_id: gastoEditando.categoria_id, persona_id: gastoEditando.persona_id, descripcion: gastoEditando.descripcion, observaciones: gastoEditando.observaciones,
-      ...(tieneCuotas ? { tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id } : { fecha_gasto: gastoEditando.fecha_gasto, monto: gastoEditando.monto, medio_pago_id: gastoEditando.medio_pago_id, cuenta_tarjeta_id: gastoEditando.cuenta_tarjeta_id, tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id }),
+      ...(tieneCuotas ? { tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id } : { fecha_gasto: gastoEditando.fecha_gasto, monto: gastoEditando.monto, medio_pago_id: gastoEditando.medio_pago_id, cuenta_tarjeta_id: nuevoTarjeta ? gastoEditando.cuenta_tarjeta_id : null, tarjeta_fisica_id: nuevoTarjeta ? gastoEditando.tarjeta_fisica_id : null, cantidad_cuotas: nuevoTarjeta ? gastoEditando.cantidad_cuotas : 1 }),
     };
     const { error: e } = await supabase.from('gastos').update(payload).eq('id', gastoEditando.id);
     if (e) return setError('No se pudo guardar la edición.');
@@ -169,6 +172,20 @@ export default function Page() {
       if (original.tarjeta_fisica_id !== gastoEditando.tarjeta_fisica_id) await supabase.from('cuotas_tarjeta').update({ tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id }).eq('gasto_id', gastoEditando.id).not('estado', 'in', '("pagada","cancelada")');
     }
     setMensajeExito('Gasto actualizado correctamente.'); setGastoEditando(null); await cargarDatos();
+  }
+
+  async function actualizarCuotaAsociada(cuota: CuotaTarjeta, cambios: { periodo_pago_estimado: string; observaciones: string | null }) {
+    if (!ESTADOS_EDITABLES_CUOTA.has(cuota.estado)) return;
+    const payload = {
+      periodo_pago_estimado: cambios.periodo_pago_estimado,
+      observaciones: cambios.observaciones,
+      estado: 'reprogramada',
+      motivo_modificacion: 'Período modificado manualmente desde historial de gastos.',
+    };
+    const { error: cuotaError } = await supabase.from('cuotas_tarjeta').update(payload).eq('id', cuota.id);
+    if (cuotaError) return setError('No se pudo actualizar la cuota asociada.');
+    setMensajeExito('Se actualizó el período estimado de pago de la cuota.');
+    await cargarDatos();
   }
 
   async function anularGasto(gasto: Gasto) {
@@ -210,21 +227,41 @@ export default function Page() {
       <input value={gastoEditando.establecimiento} onChange={(e) => setGastoEditando((p) => p ? { ...p, establecimiento: e.target.value } : null)} className="rounded-xl border px-3 py-2" />
       {renderSelect('Categoría', gastoEditando.categoria_id, categorias, (v) => setGastoEditando((p) => p ? { ...p, categoria_id: v } : null))}
       {renderSelect('Persona', gastoEditando.persona_id, personas.map((p) => ({ id: p.id, nombre: `${p.nombre} ${p.apellido ?? ''}`.trim() })), (v) => setGastoEditando((p) => p ? { ...p, persona_id: v } : null))}
-      {renderSelect('Medio de pago', gastoEditando.medio_pago_id, mediosPago, (v) => setGastoEditando((p) => p ? { ...p, medio_pago_id: v } : null))}
-      {renderSelect('Cuenta de tarjeta', gastoEditando.cuenta_tarjeta_id ?? '', cuentasTarjeta.map((c) => ({ id: c.id, nombre: c.nombre_cuenta })), (v) => setGastoEditando((p) => p ? { ...p, cuenta_tarjeta_id: v || null, tarjeta_fisica_id: null } : null))}
-      {renderSelect('Tarjeta física', gastoEditando.tarjeta_fisica_id ?? '', tarjetasDisponiblesEdicion, (v) => setGastoEditando((p) => p ? { ...p, tarjeta_fisica_id: v || null } : null))}
+      {renderSelect('Medio de pago', gastoEditando.medio_pago_id, mediosPago, (v) => setGastoEditando((p) => {
+        if (!p) return null;
+        const medioEsTarjeta = esMedioTarjetaCredito(v);
+        return { ...p, medio_pago_id: v, cuenta_tarjeta_id: medioEsTarjeta ? p.cuenta_tarjeta_id : null, tarjeta_fisica_id: medioEsTarjeta ? p.tarjeta_fisica_id : null, cantidad_cuotas: medioEsTarjeta ? p.cantidad_cuotas : 1 };
+      }), gastoEditandoTieneCuotas)}
+      {gastoEditandoEsTarjeta ? (
+        <>
+          {renderSelect('Cuenta de tarjeta', gastoEditando.cuenta_tarjeta_id ?? '', cuentasTarjeta.map((c) => ({ id: c.id, nombre: c.nombre_cuenta })), (v) => setGastoEditando((p) => p ? { ...p, cuenta_tarjeta_id: v || null, tarjeta_fisica_id: null } : null), gastoEditandoTieneCuotas)}
+          {renderSelect('Tarjeta física', gastoEditando.tarjeta_fisica_id ?? '', tarjetasDisponiblesEdicion, (v) => setGastoEditando((p) => p ? { ...p, tarjeta_fisica_id: v || null } : null))}
+        </>
+      ) : null}
       <input type="number" disabled={cuotasGastoEditando.length > 0} value={gastoEditando.monto} onChange={(e) => setGastoEditando((p) => p ? { ...p, monto: Number(e.target.value) } : null)} className="rounded-xl border px-3 py-2" />
       <textarea value={gastoEditando.descripcion ?? ''} onChange={(e) => setGastoEditando((p) => p ? { ...p, descripcion: e.target.value } : null)} className="rounded-xl border px-3 py-2" />
       <textarea value={gastoEditando.observaciones ?? ''} onChange={(e) => setGastoEditando((p) => p ? { ...p, observaciones: e.target.value } : null)} className="rounded-xl border px-3 py-2" />
       <button className="rounded-xl bg-emerald-600 px-3 py-2 text-white">Guardar cambios</button>
 
       <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Cuotas asociadas</h3>
-        {cuotasGastoEditando.map((cuota) => <div key={cuota.id} className="rounded-xl border p-2 text-sm"><p>{cuota.numero_cuota}/{cuota.total_cuotas} · {cuota.periodo_pago_estimado} · ${cuota.monto_cuota.toFixed(2)} · {cuota.estado} · {cuota.origen_cuota}</p>{ESTADOS_EDITABLES_CUOTA.has(cuota.estado) ? <p className="text-xs text-emerald-700">Editable: período y observaciones.</p> : <p className="text-xs text-slate-500">No editable (pagada/cancelada).</p>}</div>)}
+        {cuotasGastoEditando.map((cuota) => <div key={cuota.id} className="rounded-xl border p-2 text-sm">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs md:grid-cols-3">
+            <p><strong>Cuota:</strong> {cuota.numero_cuota}/{cuota.total_cuotas}</p>
+            <p><strong>Monto:</strong> ${cuota.monto_cuota.toFixed(2)}</p>
+            <p><strong>Estado:</strong> {cuota.estado}</p>
+            <p><strong>Origen:</strong> {cuota.origen_cuota}</p>
+          </div>
+          {ESTADOS_EDITABLES_CUOTA.has(cuota.estado) ? <div className="mt-2 grid gap-2 md:grid-cols-2">
+            <input value={cuota.periodo_pago_estimado} onChange={(e) => setCuotas((prev) => prev.map((item) => item.id === cuota.id ? { ...item, periodo_pago_estimado: e.target.value } : item))} className="rounded border px-2 py-1 text-xs" />
+            <input value={cuota.observaciones ?? ''} onChange={(e) => setCuotas((prev) => prev.map((item) => item.id === cuota.id ? { ...item, observaciones: e.target.value } : item))} className="rounded border px-2 py-1 text-xs" placeholder="Observaciones" />
+            <button type="button" onClick={() => void actualizarCuotaAsociada(cuota, { periodo_pago_estimado: cuota.periodo_pago_estimado, observaciones: cuota.observaciones ?? null })} className="rounded bg-emerald-600 px-2 py-1 text-xs text-white md:col-span-2">Guardar cuota</button>
+          </div> : <p className="mt-2 text-xs text-slate-500">No editable (pagada/cancelada).</p>}
+        </div>)}
       </div>
     </form>}
   </section>;
 }
 
-function renderSelect(label: string, value: string, options: OpcionBase[], onChange: (value: string) => void) {
-  return <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} className="rounded-xl border px-3 py-2 text-sm"><option value="">{label}</option>{options.map((option) => <option key={option.id} value={option.id}>{option.nombre}</option>)}</select>;
+function renderSelect(label: string, value: string, options: OpcionBase[], onChange: (value: string) => void, disabled = false) {
+  return <select aria-label={label} disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)} className="rounded-xl border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100"><option value="">{label}</option>{options.map((option) => <option key={option.id} value={option.id}>{option.nombre}</option>)}</select>;
 }

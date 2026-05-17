@@ -25,7 +25,7 @@ type CompraInicial = {
   periodo_inicio_pago: string;
   estado: string;
 };
-type CuotaGenerada = { id: string; compra_cuota_inicial_id: string; numero_cuota: number; total_cuotas: number; periodo_pago_estimado: string; monto_cuota: number; moneda: string; estado: string; tarjeta_fisica_id: string | null; persona_id: string };
+type CuotaGenerada = { id: string; compra_cuota_inicial_id: string; numero_cuota: number; total_cuotas: number; periodo_pago_estimado: string; monto_cuota: number; moneda: string; estado: string; origen_cuota?: string; observaciones?: string | null; tarjeta_fisica_id: string | null; persona_id: string };
 type Formulario = { fecha_compra_original: string; establecimiento: string; descripcion_compra: string; cuenta_tarjeta_id: string; tarjeta_fisica_id: string; persona_id: string; cuota_inicio_pendiente: number; total_cuotas: number; monto_cuota: string; moneda: string; periodo_inicio_pago: string; categoria_id: string; observaciones: string };
 
 const FORMATO_PERIODO = /^[0-9]{4}-(0[1-9]|1[0-2])$/;
@@ -50,6 +50,7 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
+  const [mostrarTodasCuotas, setMostrarTodasCuotas] = useState<Record<string, boolean>>({});
 
   const tarjetasFiltradas = useMemo(() => tarjetas.filter((tarjeta) => tarjeta.cuenta_tarjeta_id === formulario.cuenta_tarjeta_id), [tarjetas, formulario.cuenta_tarjeta_id]);
   const mapaCuenta = useMemo(() => new Map(cuentas.map((cuenta) => [cuenta.id, cuenta.nombre_cuenta])), [cuentas]);
@@ -119,7 +120,7 @@ export default function Page() {
 
   async function verCuotas(compraId: string) {
     if (cuotasPorCompra[compraId]) return setCompraExpandida((prev) => (prev === compraId ? null : compraId));
-    const { data, error: err } = await supabase.from('cuotas_tarjeta').select('id,compra_cuota_inicial_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,moneda,estado,tarjeta_fisica_id,persona_id').eq('compra_cuota_inicial_id', compraId).order('numero_cuota');
+    const { data, error: err } = await supabase.from('cuotas_tarjeta').select('id,compra_cuota_inicial_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,moneda,estado,origen_cuota,observaciones,tarjeta_fisica_id,persona_id').eq('compra_cuota_inicial_id', compraId).order('numero_cuota');
     if (err) return setError('No se pudieron consultar las cuotas generadas.');
     setCuotasPorCompra((prev) => ({ ...prev, [compraId]: (data ?? []) as CuotaGenerada[] }));
     setCompraExpandida(compraId);
@@ -224,7 +225,36 @@ export default function Page() {
         <div className="space-y-3">{compras.map((compra) => <article key={compra.id} className="rounded-xl border p-3"><div className="grid gap-1 text-sm"><p className="font-medium">{compra.establecimiento ?? 'Sin establecimiento'}</p><p className="text-slate-600">{compra.descripcion_compra ?? 'Sin descripción'}</p><p>Monto cuota: {new Intl.NumberFormat('es-AR', { style: 'currency', currency: compra.moneda }).format(compra.monto_cuota)}</p><p>Cuota pendiente inicial / total: {compra.cuota_inicio_pendiente}/{compra.total_cuotas}</p><p>Período de inicio: {compra.periodo_inicio_pago} · Estado: {compra.estado}</p><p>Cuenta: {mapaCuenta.get(compra.cuenta_tarjeta_id) ?? '-'}</p><p>Tarjeta física: {compra.tarjeta_fisica_id ? mapaTarjeta.get(compra.tarjeta_fisica_id) : 'Sin tarjeta específica'}</p><p>Persona: {mapaPersona.get(compra.persona_id) ?? '-'}</p><p>Categoría: {compra.categoria_id ? mapaCategoria.get(compra.categoria_id) : 'Sin categoría'}</p></div><div className="mt-2 flex flex-wrap gap-2"><button onClick={() => void verCuotas(compra.id)} className="rounded-lg border px-2 py-1 text-xs">Ver cuotas generadas</button><button onClick={() => void iniciarEdicion(compra)} className="rounded-lg border border-sky-200 px-2 py-1 text-xs text-sky-700">Editar carga</button><button onClick={() => void anular(compra.id)} disabled={compra.estado === 'anulada'} className="rounded-lg border border-rose-200 px-2 py-1 text-xs text-rose-700 disabled:opacity-50">Anular carga inicial</button></div>
             {compraEditandoId === compra.id && <div className="mt-3 space-y-2 rounded-lg border border-sky-100 bg-sky-50 p-3"><p className="text-xs text-slate-700">Para corregir monto, cuota inicial o total de cuotas, anulá esta carga y creá una nueva.</p><div className="grid gap-2 sm:grid-cols-2"><input type="date" value={edicionCompra.fecha_compra_original ?? ''} onChange={(e) => setEdicionCompra((p) => ({ ...p, fecha_compra_original: e.target.value }))} className="rounded-lg border px-2 py-1" /><input value={edicionCompra.establecimiento ?? ''} onChange={(e) => setEdicionCompra((p) => ({ ...p, establecimiento: e.target.value }))} placeholder="Establecimiento" className="rounded-lg border px-2 py-1" /><input value={edicionCompra.descripcion_compra ?? ''} onChange={(e) => setEdicionCompra((p) => ({ ...p, descripcion_compra: e.target.value }))} placeholder="Descripción" className="rounded-lg border px-2 py-1" /><select value={edicionCompra.categoria_id ?? ''} onChange={(e) => setEdicionCompra((p) => ({ ...p, categoria_id: e.target.value }))} className="rounded-lg border px-2 py-1"><option value="">Sin categoría</option>{categorias.map((categoria) => <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>)}</select><select value={edicionCompra.tarjeta_fisica_id ?? ''} onChange={(e) => setEdicionCompra((p) => ({ ...p, tarjeta_fisica_id: e.target.value }))} className="rounded-lg border px-2 py-1"><option value="">Sin tarjeta específica</option>{tarjetas.filter((tarjeta) => tarjeta.cuenta_tarjeta_id === compra.cuenta_tarjeta_id).map((tarjeta) => <option key={tarjeta.id} value={tarjeta.id}>{mapaTarjeta.get(tarjeta.id)}</option>)}</select><select value={edicionCompra.persona_id ?? ''} onChange={(e) => setEdicionCompra((p) => ({ ...p, persona_id: e.target.value }))} className="rounded-lg border px-2 py-1"><option value="">Seleccionar persona</option>{personas.map((persona) => <option key={persona.id} value={persona.id}>{mapaPersona.get(persona.id)}</option>)}</select></div><textarea value={edicionCompra.observaciones ?? ''} onChange={(e) => setEdicionCompra((p) => ({ ...p, observaciones: e.target.value }))} placeholder="Observaciones" className="w-full rounded-lg border px-2 py-1" />
               <button onClick={() => void guardarEdicion(compra)} className="rounded-lg bg-sky-600 px-3 py-1 text-xs font-semibold text-white">Guardar edición</button></div>}
-            {compraExpandida === compra.id && cuotasPorCompra[compra.id] && <ul className="mt-2 space-y-1">{cuotasPorCompra[compra.id].map((cuota) => <li key={cuota.id} className="rounded-lg bg-slate-50 px-3 py-2 text-xs"><div className="flex items-center justify-between gap-2"><span>{cuota.numero_cuota}/{cuota.total_cuotas} · {new Intl.NumberFormat('es-AR', { style: 'currency', currency: cuota.moneda }).format(cuota.monto_cuota)} · {cuota.estado}</span>{ESTADOS_EDITABLES.has(cuota.estado) ? <input value={periodosEdicionCuotas[cuota.id] ?? cuota.periodo_pago_estimado} onChange={(e) => setPeriodosEdicionCuotas((prev) => ({ ...prev, [cuota.id]: e.target.value }))} className="w-28 rounded border px-2 py-1" /> : <span>{cuota.periodo_pago_estimado}</span>}</div></li>)}</ul>}
+            {compraExpandida === compra.id && cuotasPorCompra[compra.id] && <div className="mt-2 space-y-2">
+              {cuotasPorCompra[compra.id].length > 10 ? <button type="button" onClick={() => setMostrarTodasCuotas((prev) => ({ ...prev, [compra.id]: !prev[compra.id] }))} className="rounded border px-2 py-1 text-xs">{mostrarTodasCuotas[compra.id] ? 'Ver menos cuotas' : `Ver todas las cuotas (${cuotasPorCompra[compra.id].length})`}</button> : null}
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead>
+                    <tr className="border-b bg-slate-50 text-left">
+                      <th className="px-2 py-1 font-medium">Cuota</th>
+                      <th className="px-2 py-1 font-medium">Período</th>
+                      <th className="px-2 py-1 font-medium">Monto</th>
+                      <th className="px-2 py-1 font-medium">Estado</th>
+                      <th className="px-2 py-1 font-medium">Origen</th>
+                      <th className="px-2 py-1 font-medium">Observaciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cuotasPorCompra[compra.id].slice(0, mostrarTodasCuotas[compra.id] || cuotasPorCompra[compra.id].length <= 10 ? undefined : 10).map((cuota) => <tr key={cuota.id} className="border-b align-top">
+                      <td className="px-2 py-1">{cuota.numero_cuota}/{cuota.total_cuotas}</td>
+                      <td className="px-2 py-1">
+                        {compraEditandoId === compra.id && ESTADOS_EDITABLES.has(cuota.estado) ? <input value={periodosEdicionCuotas[cuota.id] ?? cuota.periodo_pago_estimado} onChange={(e) => setPeriodosEdicionCuotas((prev) => ({ ...prev, [cuota.id]: e.target.value }))} className="w-24 rounded border px-1 py-0.5" /> : <span className="inline-flex rounded bg-slate-100 px-2 py-0.5">{cuota.periodo_pago_estimado}</span>}
+                      </td>
+                      <td className="px-2 py-1">{new Intl.NumberFormat('es-AR', { style: 'currency', currency: cuota.moneda }).format(cuota.monto_cuota)}</td>
+                      <td className="px-2 py-1">{cuota.estado}</td>
+                      <td className="px-2 py-1">{cuota.origen_cuota ?? '-'}</td>
+                      <td className="px-2 py-1 text-slate-600">{cuota.observaciones ?? '-'}</td>
+                    </tr>)}
+                  </tbody>
+                </table>
+              </div>
+              {compraEditandoId !== compra.id ? <p className="text-[11px] text-slate-500">Para editar períodos, primero presioná “Editar carga”.</p> : null}
+            </div>}
           </article>)}{compras.length === 0 && <p className="text-sm text-slate-500">Todavía no hay cargas iniciales.</p>}</div>
       </div>
     </section>
