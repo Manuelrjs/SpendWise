@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 
 type CuentaTarjeta = {
@@ -237,6 +237,11 @@ export default function FlujoPage() {
   const totalProximoMes = totalesPorMes.get(periodos[1]) ?? 0;
   const cuotasPendientesVisibles = cuotasParaSuma.length;
 
+  const cuentaActiva = useMemo(() => {
+    if (!celdaActiva) return null;
+    return cuentas.find((cuenta) => cuenta.id === celdaActiva.cuentaTarjetaId) ?? null;
+  }, [celdaActiva, cuentas]);
+
   const detalleCelda = useMemo(() => {
     if (!celdaActiva) return [];
     return cuotasFiltradas.filter(
@@ -367,9 +372,12 @@ export default function FlujoPage() {
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-left">
                 <tr>
-                  <th className="px-3 py-2 font-semibold">Cuenta de tarjeta</th>
+                  <th className="min-w-[320px] px-3 py-2 font-semibold">Cuenta / Compra</th>
+                  <th className="px-3 py-2 font-semibold">Cuotas</th>
+                  <th className="px-3 py-2 text-right font-semibold">Monto cuota</th>
+                  <th className="px-3 py-2 text-right font-semibold">Pendiente visible</th>
                   {periodos.map((periodo) => <th key={periodo} className="px-3 py-2 text-right font-semibold">{periodo}</th>)}
-                  <th className="px-3 py-2 text-right font-semibold">Total cuenta</th>
+                  <th className="px-3 py-2 text-right font-semibold">Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -378,17 +386,20 @@ export default function FlujoPage() {
                   const gruposCuenta = desglosePorCuenta.get(cuenta.id) ?? [];
                   const filaExpandida = mostrarDesglose && gruposCuenta.length > 0;
                   return (
-                    <Fragment key={cuenta.id}>
+                    <>
                     <tr key={cuenta.id} className="border-t">
                         <td className="px-3 py-2 font-medium">{cuenta.nombre_cuenta}</td>
+                        <td className="px-3 py-2 text-slate-400">—</td>
+                        <td className="px-3 py-2 text-right text-slate-400">—</td>
+                        <td className="px-3 py-2 text-right text-slate-400">—</td>
                         {periodos.map((periodo) => {
                           const monto = matriz.get(cuenta.id)?.get(periodo) ?? 0;
                           const activa = celdaActiva?.cuentaTarjetaId === cuenta.id && celdaActiva.periodo === periodo;
                           return (
-                            <td key={periodo} className="px-3 py-2 text-right">
+                            <td key={periodo} className="px-3 py-2 text-right tabular-nums">
                               <button
                                 onClick={() => manejarClickCelda(cuenta.id, periodo, monto)}
-                                className={`rounded-lg px-2 py-1 transition ${activa ? 'bg-emerald-100 text-emerald-900' : 'hover:bg-slate-100'}`}
+                                className={`w-full rounded-lg px-2 py-1 text-right transition ${activa ? 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300' : 'hover:bg-slate-100'}`}
                                 disabled={monto <= 0}
                               >
                                 {monto > 0 ? formatearMonto(monto, 'ARS') : '—'}
@@ -396,24 +407,37 @@ export default function FlujoPage() {
                             </td>
                           );
                         })}
-                        <td className="px-3 py-2 text-right font-semibold">{formatearMonto(totalCuenta, 'ARS')}</td>
+                        <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatearMonto(totalCuenta, 'ARS')}</td>
                     </tr>
-                      {filaExpandida && (
-                        <tr key={`${cuenta.id}-detalle`} className="border-t bg-slate-50/60">
-                          <td colSpan={periodos.length + 2} className="px-3 py-3">
-                            <div className="space-y-3">
-                              <TablaDesgloseCuenta grupos={gruposCuenta} periodos={periodos} nombresPersonas={nombresPersonas} nombresTarjetas={nombresTarjetas} totalPorPeriodo={matriz.get(cuenta.id) ?? new Map()} />
-                            </div>
+                      {filaExpandida && gruposCuenta.map((grupo) => {
+                        const totalGrupo = periodos.reduce((acc, periodo) => acc + (grupo.montosPorPeriodo.get(periodo) ?? 0), 0);
+                        return <tr key={grupo.clave} className="border-t bg-slate-50/60 align-top">
+                          <td className="px-3 py-2 pl-8">
+                            <p className="font-semibold">{grupo.establecimiento}</p>
+                            <p className="text-slate-600">{grupo.descripcion}</p>
+                            <p className="text-slate-500">Persona: {grupo.personaId ? nombresPersonas.get(grupo.personaId) ?? 'Sin persona' : 'Sin persona'} · Tarjeta: {grupo.tarjetaFisicaId ? nombresTarjetas.get(grupo.tarjetaFisicaId) ?? 'Sin tarjeta' : 'Sin tarjeta'}</p>
+                            <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-xs ${BADGE_ORIGEN[grupo.origen] ?? 'bg-slate-50 text-slate-700 border-slate-200'}`}>origen: {grupo.origen}</span>
                           </td>
-                        </tr>
-                      )}
-                    </Fragment>
+                          <td className="px-3 py-2">{grupo.cuotasPendientes}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{formatearMonto(grupo.montoCuotaReferencia, grupo.moneda)}</td>
+                          <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatearMonto(grupo.totalPendienteVisible, grupo.moneda)}</td>
+                          {periodos.map((periodo) => {
+                            const monto = grupo.montosPorPeriodo.get(periodo) ?? 0;
+                            return <td key={`${grupo.clave}-${periodo}`} className="px-3 py-2 text-right tabular-nums">{monto > 0 ? formatearMonto(monto, grupo.moneda) : '—'}</td>;
+                          })}
+                          <td className="px-3 py-2 text-right tabular-nums font-semibold">{formatearMonto(totalGrupo, grupo.moneda)}</td>
+                        </tr>;
+                      })}
+                    </>
                   );
                 })}
               </tbody>
               <tfoot className="border-t bg-slate-50 font-semibold">
                 <tr>
                   <td className="px-3 py-2">Total a reservar</td>
+                  <td />
+                  <td />
+                  <td />
                   {periodos.map((periodo) => <td key={periodo} className="px-3 py-2 text-right">{formatearMonto(totalesPorMes.get(periodo) ?? 0, 'ARS')}</td>)}
                   <td className="px-3 py-2 text-right">{formatearMonto(totalGeneralVisible, 'ARS')}</td>
                 </tr>
@@ -445,7 +469,7 @@ export default function FlujoPage() {
       {celdaActiva && (
         <section className="space-y-2 rounded-2xl border bg-white p-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Detalle de cuotas · {celdaActiva.periodo}</h2>
+            <h2 className="text-lg font-semibold">Detalle de {cuentaActiva?.nombre_cuenta ?? 'Cuenta'} · {celdaActiva.periodo}</h2>
             <button onClick={() => setCeldaActiva(null)} className="rounded-lg border px-2 py-1 text-xs">Cerrar</button>
           </div>
           {detalleCelda.length === 0 ? <p className="text-sm text-slate-600">No hay cuotas para esta combinación.</p> : (
@@ -457,26 +481,6 @@ export default function FlujoPage() {
   );
 }
 
-
-function TablaDesgloseCuenta({ grupos, periodos, nombresPersonas, nombresTarjetas, totalPorPeriodo }: { grupos: GrupoCompra[]; periodos: string[]; nombresPersonas: Map<string, string>; nombresTarjetas: Map<string, string>; totalPorPeriodo: Map<string, number>; }) {
-  return (
-    <div className="overflow-x-auto rounded-xl border bg-white">
-      <table className="min-w-full text-xs">
-        <thead className="bg-slate-50">
-          <tr>
-            <th className="px-2 py-2 text-left font-semibold">Compra / compromiso</th>
-            <th className="px-2 py-2 text-left font-semibold">Cuotas</th>
-            <th className="px-2 py-2 text-right font-semibold">Monto cuota</th>
-            <th className="px-2 py-2 text-right font-semibold">Pendiente visible</th>
-            {periodos.map((periodo) => <th key={periodo} className="px-2 py-2 text-right font-semibold">{periodo}</th>)}
-          </tr>
-        </thead><tbody>
-          {grupos.map((grupo) => (<tr key={grupo.clave} className="border-t align-top"><td className="px-2 py-2"><p className="font-semibold">{grupo.establecimiento}</p><p className="text-slate-600">{grupo.descripcion}</p><p className="text-slate-500">Persona: {grupo.personaId ? nombresPersonas.get(grupo.personaId) ?? 'Sin persona' : 'Sin persona'} · Tarjeta: {grupo.tarjetaFisicaId ? nombresTarjetas.get(grupo.tarjetaFisicaId) ?? 'Sin tarjeta' : 'Sin tarjeta'}</p><span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 ${BADGE_ORIGEN[grupo.origen] ?? 'bg-slate-50 text-slate-700 border-slate-200'}`}>origen: {grupo.origen}</span></td><td className="px-2 py-2">{grupo.cuotasPendientes}</td><td className="px-2 py-2 text-right tabular-nums">{formatearMonto(grupo.montoCuotaReferencia, grupo.moneda)}</td><td className="px-2 py-2 text-right font-semibold tabular-nums">{formatearMonto(grupo.totalPendienteVisible, grupo.moneda)}</td>{periodos.map((periodo) => {const monto = grupo.montosPorPeriodo.get(periodo) ?? 0; return <td key={`${grupo.clave}-${periodo}`} className="px-2 py-2 text-right tabular-nums">{monto > 0 ? formatearMonto(monto, grupo.moneda) : '—'}</td>;})}</tr>))}
-        </tbody><tfoot className="border-t bg-slate-50 font-semibold"><tr><td className="px-2 py-2">Total desglose</td><td /><td /><td />{periodos.map((periodo) => <td key={periodo} className="px-2 py-2 text-right tabular-nums">{formatearMonto(totalPorPeriodo.get(periodo) ?? 0, 'ARS')}</td>)}</tr></tfoot>
-      </table>
-    </div>
-  );
-}
 
 function DetalleCuotasLista({
   cuotas,
