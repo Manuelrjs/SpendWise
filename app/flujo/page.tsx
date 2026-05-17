@@ -14,6 +14,8 @@ type TarjetaFisica = { id: string; alias: string | null; tipo: string; ultimos_4
 
 type CuotaTarjeta = {
   id: string;
+  gasto_id: string | null;
+  compra_cuota_inicial_id: string | null;
   cuenta_tarjeta_id: string;
   tarjeta_fisica_id: string | null;
   persona_id: string | null;
@@ -27,6 +29,22 @@ type CuotaTarjeta = {
   estado: string;
   origen_cuota: string;
   observaciones: string | null;
+};
+
+type GrupoCompra = {
+  clave: string;
+  cuentaTarjetaId: string;
+  establecimiento: string;
+  descripcion: string;
+  tarjetaFisicaId: string | null;
+  personaId: string | null;
+  origen: string;
+  moneda: string;
+  cuotas: CuotaTarjeta[];
+  cuotasPendientes: string;
+  montoCuotaReferencia: number;
+  totalPendienteVisible: number;
+  montosPorPeriodo: Map<string, number>;
 };
 
 type Filtros = {
@@ -71,6 +89,24 @@ function obtenerPeriodoActual() {
   return `${hoy.getUTCFullYear()}-${String(hoy.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+
+function obtenerClaveGrupo(cuota: CuotaTarjeta) {
+  if (cuota.gasto_id) return `gasto:${cuota.gasto_id}`;
+  if (cuota.compra_cuota_inicial_id) return `inicial:${cuota.compra_cuota_inicial_id}`;
+  const establecimiento = cuota.establecimiento.trim().toLowerCase();
+  const descripcion = (cuota.descripcion_cuota ?? '').trim().toLowerCase();
+  return `fallback:${cuota.cuenta_tarjeta_id}:${establecimiento}:${descripcion}`;
+}
+
+function obtenerRangoCuotas(cuotas: CuotaTarjeta[]) {
+  const ordenadas = [...cuotas].sort((a, b) => a.numero_cuota - b.numero_cuota);
+  if (ordenadas.length === 0) return 'Sin cuotas';
+  const primera = ordenadas[0];
+  const ultima = ordenadas[ordenadas.length - 1];
+  if (primera.numero_cuota === ultima.numero_cuota) return `${primera.numero_cuota}/${primera.total_cuotas}`;
+  return `${primera.numero_cuota}/${primera.total_cuotas} a ${ultima.numero_cuota}/${ultima.total_cuotas}`;
+}
+
 function formatearMonto(monto: number, moneda: string) {
   return new Intl.NumberFormat('es-AR', {
     style: 'currency',
@@ -112,7 +148,7 @@ export default function FlujoPage() {
       supabase.from('tarjetas_fisicas').select('id,alias,tipo,ultimos_4_digitos').order('alias'),
       supabase
         .from('cuotas_tarjeta')
-        .select('id,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,establecimiento,descripcion_cuota,numero_cuota,total_cuotas,monto_cuota,moneda,periodo_pago_estimado,estado,origen_cuota,observaciones')
+        .select('id,gasto_id,compra_cuota_inicial_id,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,establecimiento,descripcion_cuota,numero_cuota,total_cuotas,monto_cuota,moneda,periodo_pago_estimado,estado,origen_cuota,observaciones')
         .not('estado', 'in', '(cancelada)'),
     ]);
 
@@ -208,16 +244,61 @@ export default function FlujoPage() {
     );
   }, [celdaActiva, cuotasFiltradas]);
 
-  const cuotasPorCuentaYPeriodo = useMemo(() => {
-    const agrupadas = new Map<string, CuotaTarjeta[]>();
-    for (const cuota of cuotasFiltradas) {
-      const clave = `${cuota.cuenta_tarjeta_id}__${cuota.periodo_pago_estimado}`;
-      const previas = agrupadas.get(clave) ?? [];
-      previas.push(cuota);
-      agrupadas.set(clave, previas);
+  const desglosePorCuenta = useMemo(() => {
+    const porCuenta = new Map<string, GrupoCompra[]>();
+
+    for (const cuenta of cuentasVisibles) {
+      porCuenta.set(cuenta.id, []);
     }
-    return agrupadas;
-  }, [cuotasFiltradas]);
+
+    const grupos = new Map<string, GrupoCompra>();
+
+    for (const cuota of cuotasParaSuma) {
+      if (!periodos.includes(cuota.periodo_pago_estimado)) continue;
+      if (!porCuenta.has(cuota.cuenta_tarjeta_id)) continue;
+
+      const claveBase = obtenerClaveGrupo(cuota);
+      const clave = `${cuota.cuenta_tarjeta_id}__${claveBase}`;
+      const actual = grupos.get(clave);
+
+      if (!actual) {
+        grupos.set(clave, {
+          clave,
+          cuentaTarjetaId: cuota.cuenta_tarjeta_id,
+          establecimiento: cuota.establecimiento,
+          descripcion: cuota.descripcion_cuota ?? 'Sin descripción',
+          tarjetaFisicaId: cuota.tarjeta_fisica_id,
+          personaId: cuota.persona_id,
+          origen: cuota.origen_cuota,
+          moneda: cuota.moneda,
+          cuotas: [cuota],
+          cuotasPendientes: '',
+          montoCuotaReferencia: cuota.monto_cuota,
+          totalPendienteVisible: cuota.monto_cuota,
+          montosPorPeriodo: new Map(periodos.map((periodo) => [periodo, periodo === cuota.periodo_pago_estimado ? cuota.monto_cuota : 0])),
+        });
+        continue;
+      }
+
+      actual.cuotas.push(cuota);
+      actual.totalPendienteVisible += cuota.monto_cuota;
+      const previo = actual.montosPorPeriodo.get(cuota.periodo_pago_estimado) ?? 0;
+      actual.montosPorPeriodo.set(cuota.periodo_pago_estimado, previo + cuota.monto_cuota);
+    }
+
+    for (const grupo of grupos.values()) {
+      grupo.cuotasPendientes = obtenerRangoCuotas(grupo.cuotas);
+      grupo.cuotas.sort((a, b) => (a.periodo_pago_estimado === b.periodo_pago_estimado ? a.numero_cuota - b.numero_cuota : a.periodo_pago_estimado.localeCompare(b.periodo_pago_estimado)));
+      porCuenta.get(grupo.cuentaTarjetaId)?.push(grupo);
+    }
+
+    for (const [cuentaId, gruposCuenta] of porCuenta.entries()) {
+      gruposCuenta.sort((a, b) => a.establecimiento.localeCompare(b.establecimiento));
+      porCuenta.set(cuentaId, gruposCuenta);
+    }
+
+    return porCuenta;
+  }, [cuotasParaSuma, cuentasVisibles, periodos]);
 
   const manejarClickCelda = (cuentaTarjetaId: string, periodo: string, monto: number) => {
     if (monto <= 0) return;
@@ -294,9 +375,8 @@ export default function FlujoPage() {
               <tbody>
                 {cuentasVisibles.map((cuenta) => {
                   const totalCuenta = periodos.reduce((acc, periodo) => acc + (matriz.get(cuenta.id)?.get(periodo) ?? 0), 0);
-                  const filaExpandida = mostrarDesglose
-                    ? periodos.some((periodo) => (cuotasPorCuentaYPeriodo.get(`${cuenta.id}__${periodo}`)?.length ?? 0) > 0)
-                    : false;
+                  const gruposCuenta = desglosePorCuenta.get(cuenta.id) ?? [];
+                  const filaExpandida = mostrarDesglose && gruposCuenta.length > 0;
                   return (
                     <Fragment key={cuenta.id}>
                     <tr key={cuenta.id} className="border-t">
@@ -322,16 +402,7 @@ export default function FlujoPage() {
                         <tr key={`${cuenta.id}-detalle`} className="border-t bg-slate-50/60">
                           <td colSpan={periodos.length + 2} className="px-3 py-3">
                             <div className="space-y-3">
-                              {periodos.map((periodo) => {
-                                const cuotasPeriodo = cuotasPorCuentaYPeriodo.get(`${cuenta.id}__${periodo}`) ?? [];
-                                if (cuotasPeriodo.length === 0) return null;
-                                return (
-                                  <div key={`${cuenta.id}-${periodo}`} className="rounded-xl border bg-white p-3">
-                                    <p className="mb-2 text-sm font-semibold">{periodo} · {formatearMonto(matriz.get(cuenta.id)?.get(periodo) ?? 0, 'ARS')}</p>
-                                    <DetalleCuotasLista cuotas={cuotasPeriodo} nombresPersonas={nombresPersonas} nombresTarjetas={nombresTarjetas} />
-                                  </div>
-                                );
-                              })}
+                              <TablaDesgloseCuenta grupos={gruposCuenta} periodos={periodos} nombresPersonas={nombresPersonas} nombresTarjetas={nombresTarjetas} totalPorPeriodo={matriz.get(cuenta.id) ?? new Map()} />
                             </div>
                           </td>
                         </tr>
@@ -362,18 +433,7 @@ export default function FlujoPage() {
                 </div>
                 {mostrarDesglose && (
                   <div className="mt-3 space-y-3">
-                    {periodos.map((periodo) => {
-                      const cuotasPeriodo = cuotasPorCuentaYPeriodo.get(`${cuenta.id}__${periodo}`) ?? [];
-                      if (cuotasPeriodo.length === 0) return null;
-                      return (
-                        <section key={`${cuenta.id}-${periodo}`} className="rounded-xl border bg-slate-50 p-2">
-                          <p className="text-xs font-semibold">{periodo} · {formatearMonto(matriz.get(cuenta.id)?.get(periodo) ?? 0, 'ARS')}</p>
-                          <div className="mt-2">
-                            <DetalleCuotasLista cuotas={cuotasPeriodo} nombresPersonas={nombresPersonas} nombresTarjetas={nombresTarjetas} />
-                          </div>
-                        </section>
-                      );
-                    })}
+                    {(desglosePorCuenta.get(cuenta.id) ?? []).map((grupo) => (<article key={grupo.clave} className="rounded-xl border bg-slate-50 p-2 text-xs"><p className="font-semibold">{grupo.establecimiento}</p><p className="text-slate-600">{grupo.descripcion} · {grupo.cuotasPendientes}</p><div className="mt-1 grid grid-cols-2 gap-1">{periodos.map((periodo) => <div key={periodo} className="rounded border bg-white px-2 py-1"><p className="text-[11px] text-slate-500">{periodo}</p><p className="font-semibold">{(grupo.montosPorPeriodo.get(periodo) ?? 0) > 0 ? formatearMonto(grupo.montosPorPeriodo.get(periodo) ?? 0, grupo.moneda) : '—'}</p></div>)}</div></article>))}
                   </div>
                 )}
               </article>
@@ -394,6 +454,27 @@ export default function FlujoPage() {
         </section>
       )}
     </section>
+  );
+}
+
+
+function TablaDesgloseCuenta({ grupos, periodos, nombresPersonas, nombresTarjetas, totalPorPeriodo }: { grupos: GrupoCompra[]; periodos: string[]; nombresPersonas: Map<string, string>; nombresTarjetas: Map<string, string>; totalPorPeriodo: Map<string, number>; }) {
+  return (
+    <div className="overflow-x-auto rounded-xl border bg-white">
+      <table className="min-w-full text-xs">
+        <thead className="bg-slate-50">
+          <tr>
+            <th className="px-2 py-2 text-left font-semibold">Compra / compromiso</th>
+            <th className="px-2 py-2 text-left font-semibold">Cuotas</th>
+            <th className="px-2 py-2 text-right font-semibold">Monto cuota</th>
+            <th className="px-2 py-2 text-right font-semibold">Pendiente visible</th>
+            {periodos.map((periodo) => <th key={periodo} className="px-2 py-2 text-right font-semibold">{periodo}</th>)}
+          </tr>
+        </thead><tbody>
+          {grupos.map((grupo) => (<tr key={grupo.clave} className="border-t align-top"><td className="px-2 py-2"><p className="font-semibold">{grupo.establecimiento}</p><p className="text-slate-600">{grupo.descripcion}</p><p className="text-slate-500">Persona: {grupo.personaId ? nombresPersonas.get(grupo.personaId) ?? 'Sin persona' : 'Sin persona'} · Tarjeta: {grupo.tarjetaFisicaId ? nombresTarjetas.get(grupo.tarjetaFisicaId) ?? 'Sin tarjeta' : 'Sin tarjeta'}</p><span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 ${BADGE_ORIGEN[grupo.origen] ?? 'bg-slate-50 text-slate-700 border-slate-200'}`}>origen: {grupo.origen}</span></td><td className="px-2 py-2">{grupo.cuotasPendientes}</td><td className="px-2 py-2 text-right tabular-nums">{formatearMonto(grupo.montoCuotaReferencia, grupo.moneda)}</td><td className="px-2 py-2 text-right font-semibold tabular-nums">{formatearMonto(grupo.totalPendienteVisible, grupo.moneda)}</td>{periodos.map((periodo) => {const monto = grupo.montosPorPeriodo.get(periodo) ?? 0; return <td key={`${grupo.clave}-${periodo}`} className="px-2 py-2 text-right tabular-nums">{monto > 0 ? formatearMonto(monto, grupo.moneda) : '—'}</td>;})}</tr>))}
+        </tbody><tfoot className="border-t bg-slate-50 font-semibold"><tr><td className="px-2 py-2">Total desglose</td><td /><td /><td />{periodos.map((periodo) => <td key={periodo} className="px-2 py-2 text-right tabular-nums">{formatearMonto(totalPorPeriodo.get(periodo) ?? 0, 'ARS')}</td>)}</tr></tfoot>
+      </table>
+    </div>
   );
 }
 
