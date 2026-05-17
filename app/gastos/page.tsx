@@ -32,12 +32,13 @@ type CuotaTarjeta = {
   total_cuotas: number;
   periodo_pago_estimado: string;
   monto_cuota: number;
-  estado_cuota: string;
+  estado: string;
   origen_cuota: string;
   persona_id: string;
   tarjeta_fisica_id: string | null;
   cuenta_tarjeta_id: string;
   observaciones: string | null;
+  creado_en?: string;
 };
 
 type Filtros = {
@@ -112,10 +113,20 @@ export default function Page() {
       supabase.from('personas').select('id,nombre,apellido').order('nombre'),
       supabase.from('cuentas_tarjeta').select('id,nombre_cuenta').order('nombre_cuenta'),
       supabase.from('tarjetas_fisicas').select('id,alias,ultimos_4_digitos,tipo').order('alias'),
-      supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado_cuota,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones').order('numero_cuota'),
+      supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,creado_en')
     ]);
-    if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error) { setError('No se pudieron cargar los gastos.'); setCargando(false); return; }
-    setGastos((g.data ?? []) as Gasto[]); setCategorias((c.data ?? []) as OpcionBase[]); setMediosPago((m.data ?? []) as OpcionBase[]); setPersonas((p.data ?? []) as Persona[]); setCuentasTarjeta((ct.data ?? []) as CuentaTarjeta[]); setTarjetasFisicas((tf.data ?? []) as TarjetaFisica[]); setCuotas((cuotasRes.data ?? []) as CuotaTarjeta[]); setCargando(false);
+    if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error) {
+      console.error(g.error ?? c.error ?? m.error ?? p.error ?? ct.error ?? tf.error ?? cuotasRes.error);
+      setError('No se pudieron cargar los gastos.');
+      setCargando(false);
+      return;
+    }
+    const cuotasOrdenadas = [ ...((cuotasRes.data ?? []) as CuotaTarjeta[]) ]
+      .sort((a, b) => (a.gasto_id === b.gasto_id
+        ? a.numero_cuota - b.numero_cuota
+        : a.gasto_id.localeCompare(b.gasto_id)));
+
+    setGastos((g.data ?? []) as Gasto[]); setCategorias((c.data ?? []) as OpcionBase[]); setMediosPago((m.data ?? []) as OpcionBase[]); setPersonas((p.data ?? []) as Persona[]); setCuentasTarjeta((ct.data ?? []) as CuentaTarjeta[]); setTarjetasFisicas((tf.data ?? []) as TarjetaFisica[]); setCuotas(cuotasOrdenadas); setCargando(false);
   }
 
   async function guardarEdicion(event: FormEvent) {
@@ -135,10 +146,10 @@ export default function Page() {
       ...(esTarjetaConCuotas ? {} : { fecha_gasto: gastoEditando.fecha_gasto, monto: gastoEditando.monto, moneda: gastoEditando.moneda, medio_pago_id: gastoEditando.medio_pago_id }),
     };
     const { error: e1 } = await supabase.from('gastos').update(payloadBase).eq('id', gastoEditando.id);
-    if (e1) { setError('No se pudo guardar la edición.'); setGuardandoEdicion(false); return; }
+    if (e1) { console.error(e1); setError('No se pudo guardar la edición.'); setGuardandoEdicion(false); return; }
 
     if (esTarjetaConCuotas) {
-      const actualizarCuotas = async (cambios: Partial<CuotaTarjeta>) => supabase.from('cuotas_tarjeta').update(cambios).eq('gasto_id', gastoEditando.id).not('estado_cuota', 'in', '("pagada","cancelada")');
+      const actualizarCuotas = async (cambios: Partial<CuotaTarjeta>) => supabase.from('cuotas_tarjeta').update(cambios).eq('gasto_id', gastoEditando.id).not('estado', 'in', '("pagada","cancelada")');
       if (original?.persona_id !== gastoEditando.persona_id) await actualizarCuotas({ persona_id: gastoEditando.persona_id });
       if (original?.tarjeta_fisica_id !== gastoEditando.tarjeta_fisica_id) await actualizarCuotas({ tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id });
       if (cambiaCuenta) {
@@ -160,15 +171,15 @@ export default function Page() {
     if (!window.confirm(texto)) return;
     setError(null); setMensajeExito(null);
     const { error: e1 } = await supabase.from('gastos').update({ estado_registro: 'anulado' }).eq('id', gasto.id);
-    if (e1) return setError('No se pudo anular el gasto.');
-    await supabase.from('cuotas_tarjeta').update({ estado_cuota: 'cancelada' }).eq('gasto_id', gasto.id).neq('estado_cuota', 'pagada');
+    if (e1) { console.error(e1); return setError('No se pudo anular el gasto.'); }
+    await supabase.from('cuotas_tarjeta').update({ estado: 'cancelada' }).eq('gasto_id', gasto.id).neq('estado', 'pagada');
     setMensajeExito('Gasto anulado correctamente.');
     await cargarDatos();
   }
 
   async function reactivarGasto(gasto: Gasto) {
     const { error: e } = await supabase.from('gastos').update({ estado_registro: 'confirmado' }).eq('id', gasto.id);
-    if (e) return setError('No se pudo reactivar el gasto.');
+    if (e) { console.error(e); return setError('No se pudo reactivar el gasto.'); }
     setMensajeExito('Gasto reactivado. Las cuotas asociadas permanecen canceladas. Revisalas manualmente.');
     await cargarDatos();
   }
@@ -176,9 +187,9 @@ export default function Page() {
   async function guardarCuota(cuota: CuotaTarjeta) {
     const edicion = edicionesCuotas[cuota.id]; if (!edicion) return;
     if (!/^\d{4}-\d{2}$/.test(edicion.periodo_pago_estimado)) return setError('El período debe tener formato YYYY-MM.');
-    const estadoNuevo = cuota.estado_cuota === 'reprogramada' ? 'reprogramada' : 'reprogramada';
-    const { error: e } = await supabase.from('cuotas_tarjeta').update({ periodo_pago_estimado: edicion.periodo_pago_estimado, observaciones: edicion.observaciones || null, estado_cuota: estadoNuevo }).eq('id', cuota.id);
-    if (e) return setError('No se pudo actualizar la cuota.');
+    const estadoNuevo = cuota.estado === 'reprogramada' ? 'reprogramada' : 'reprogramada';
+    const { error: e } = await supabase.from('cuotas_tarjeta').update({ periodo_pago_estimado: edicion.periodo_pago_estimado, observaciones: edicion.observaciones || null, estado: estadoNuevo }).eq('id', cuota.id);
+    if (e) { console.error(e); return setError('No se pudo actualizar la cuota.'); }
     setMensajeExito('Se actualizó el período estimado de pago de la cuota.');
     await cargarDatos();
   }
@@ -187,7 +198,7 @@ export default function Page() {
     <h1 className="text-2xl font-semibold">Historial de gastos</h1>
     {mensajeExito && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{mensajeExito}</p>}
     {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
-    <div className="hidden overflow-x-auto rounded-2xl border bg-white md:block"><table className="min-w-full text-sm"><tbody>{gastosFiltrados.map((gasto) => <FilaGasto key={gasto.id} gasto={gasto} categoria={nombresCategoria.get(gasto.categoria_id) ?? 'Sin categoría'} medioPago={nombresMedioPago.get(gasto.medio_pago_id) ?? 'Sin medio'} persona={nombresPersona.get(gasto.persona_id) ?? 'Sin persona'} cuotas={cuotasPorGasto.get(gasto.id) ?? gasto.cantidad_cuotas} onEdit={() => setGastoEditando(gasto)} onAnular={() => void anularGasto(gasto)} onReactivar={() => void reactivarGasto(gasto)} />)}</tbody></table></div>
+    <div className="hidden overflow-x-auto rounded-2xl border bg-white md:block"><table className="min-w-full text-sm"><tbody>{gastosFiltrados.length === 0 ? <tr><td className="px-2 py-6 text-center text-slate-500">Todavía no hay gastos registrados.</td></tr> : gastosFiltrados.map((gasto) => <FilaGasto key={gasto.id} gasto={gasto} categoria={nombresCategoria.get(gasto.categoria_id) ?? 'Sin categoría'} medioPago={nombresMedioPago.get(gasto.medio_pago_id) ?? 'Sin medio'} persona={nombresPersona.get(gasto.persona_id) ?? 'Sin persona'} cuotas={cuotasPorGasto.get(gasto.id) ?? gasto.cantidad_cuotas} onEdit={() => setGastoEditando(gasto)} onAnular={() => void anularGasto(gasto)} onReactivar={() => void reactivarGasto(gasto)} />)}</tbody></table></div>
 
     {gastoEditando && <form onSubmit={guardarEdicion} className="space-y-2 rounded-2xl border bg-white p-4">
       <h2 className="font-semibold">Editar gasto</h2>
@@ -205,12 +216,12 @@ export default function Page() {
 
       <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Cuotas asociadas</h3>
         {cuotasGastoEditando.map((cuota) => {
-          const editable = ESTADOS_EDITABLES_CUOTA.has(cuota.estado_cuota);
+          const editable = ESTADOS_EDITABLES_CUOTA.has(cuota.estado);
           const ed = edicionesCuotas[cuota.id] ?? { id: cuota.id, periodo_pago_estimado: cuota.periodo_pago_estimado, observaciones: cuota.observaciones ?? '' };
-          return <div key={cuota.id} className="rounded-xl border p-2 text-sm"><p>{cuota.numero_cuota}/{cuota.total_cuotas} · {cuota.estado_cuota} · {cuota.origen_cuota}</p>
+          return <div key={cuota.id} className="rounded-xl border p-2 text-sm"><p>{cuota.numero_cuota}/{cuota.total_cuotas} · {cuota.estado} · {cuota.origen_cuota}</p>
             <input disabled={!editable} value={ed.periodo_pago_estimado} onChange={(e) => setEdicionesCuotas((p) => ({ ...p, [cuota.id]: { ...ed, periodo_pago_estimado: e.target.value } }))} className="mt-1 rounded border px-2 py-1" />
             <textarea disabled={!editable} value={ed.observaciones} onChange={(e) => setEdicionesCuotas((p) => ({ ...p, [cuota.id]: { ...ed, observaciones: e.target.value } }))} className="mt-1 w-full rounded border px-2 py-1" />
-            {ESTADOS_NO_EDITABLES_CUOTA.has(cuota.estado_cuota) ? <p className="text-xs text-slate-500">Cuota no editable por su estado.</p> : <button type="button" onClick={() => void guardarCuota(cuota)} className="mt-1 rounded border px-2 py-1 text-xs">Guardar cuota</button>}
+            {ESTADOS_NO_EDITABLES_CUOTA.has(cuota.estado) ? <p className="text-xs text-slate-500">Cuota no editable por su estado.</p> : <button type="button" onClick={() => void guardarCuota(cuota)} className="mt-1 rounded border px-2 py-1 text-xs">Guardar cuota</button>}
           </div>;
         })}
       </div>
