@@ -4,6 +4,7 @@ const enlaces = [
   { href: '/', etiqueta: 'Inicio' },
   { href: '/gastos/nuevo', etiqueta: 'Nuevo gasto' },
   { href: '/gastos', etiqueta: 'Gastos' },
+  { href: '/reportes', etiqueta: 'Reportes' },
   { href: '/tarjetas', etiqueta: 'Tarjetas' },
   { href: '/calendario', etiqueta: 'Calendario' },
   { href: '/flujo', etiqueta: 'Flujo mensual' },
