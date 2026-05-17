@@ -20,12 +20,21 @@ type CuotaTarjeta = {
   periodo_pago_estimado: string;
   estado: string;
   cuenta_tarjeta_id: string;
+  tarjeta_fisica_id: string | null;
+  persona_id: string;
+  establecimiento: string;
+  descripcion_cuota: string;
+  numero_cuota: number;
+  total_cuotas: number;
+  origen_cuota: string;
+  observaciones: string | null;
 };
 
 type Categoria = { id: string; nombre: string };
 type MedioPago = { id: string; nombre: string };
 type Persona = { id: string; nombre: string; apellido: string | null };
 type CuentaTarjeta = { id: string; nombre_cuenta: string };
+type TarjetaFisica = { id: string; alias: string; numero_ultimos4: string | null };
 
 type FilaResumen = {
   id: string;
@@ -71,6 +80,15 @@ function badgeBase() {
   return 'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-slate-50 text-slate-700 border-slate-200';
 }
 
+function formatearPeriodoLargo(periodo: string) {
+  const [anioRaw, mesRaw] = periodo.split('-');
+  const anio = Number(anioRaw);
+  const mes = Number(mesRaw);
+  if (Number.isNaN(anio) || Number.isNaN(mes)) return periodo;
+  const fecha = new Date(Date.UTC(anio, mes - 1, 1));
+  return new Intl.DateTimeFormat('es-AR', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(fecha);
+}
+
 export default function DashboardPage() {
   const [mesSeleccionado, setMesSeleccionado] = useState(obtenerPeriodoActual());
   const [cargando, setCargando] = useState(true);
@@ -84,6 +102,8 @@ export default function DashboardPage() {
   const [mediosPago, setMediosPago] = useState<Map<string, string>>(new Map());
   const [personas, setPersonas] = useState<Map<string, string>>(new Map());
   const [cuentasTarjeta, setCuentasTarjeta] = useState<Map<string, string>>(new Map());
+  const [tarjetasFisicas, setTarjetasFisicas] = useState<Map<string, string>>(new Map());
+  const [detalleCuotasAbierto, setDetalleCuotasAbierto] = useState(false);
 
   useEffect(() => {
     void cargarDashboard(mesSeleccionado);
@@ -104,6 +124,7 @@ export default function DashboardPage() {
       mediosRes,
       personasRes,
       cuentasRes,
+      tarjetasRes,
     ] = await Promise.all([
       supabase
         .from('gastos')
@@ -113,18 +134,19 @@ export default function DashboardPage() {
         .lte('fecha_gasto', fin),
       supabase
         .from('cuotas_tarjeta')
-        .select('id,monto_cuota,periodo_pago_estimado,estado,cuenta_tarjeta_id')
+        .select('id,monto_cuota,periodo_pago_estimado,estado,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,establecimiento,descripcion_cuota,numero_cuota,total_cuotas,origen_cuota,observaciones')
         .eq('periodo_pago_estimado', periodo)
         .not('estado', 'in', `(${ESTADOS_CUOTA_EXCLUIDOS.join(',')})`),
       supabase
         .from('cuotas_tarjeta')
-        .select('id,monto_cuota,periodo_pago_estimado,estado,cuenta_tarjeta_id')
+        .select('id,monto_cuota,periodo_pago_estimado,estado,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,establecimiento,descripcion_cuota,numero_cuota,total_cuotas,origen_cuota,observaciones')
         .eq('periodo_pago_estimado', proximoPeriodo)
         .not('estado', 'in', `(${ESTADOS_CUOTA_EXCLUIDOS.join(',')})`),
       supabase.from('categorias').select('id,nombre'),
       supabase.from('medios_pago').select('id,nombre'),
       supabase.from('personas').select('id,nombre,apellido'),
       supabase.from('cuentas_tarjeta').select('id,nombre_cuenta'),
+      supabase.from('tarjetas_fisicas').select('id,alias,numero_ultimos4'),
     ]);
 
     if (
@@ -134,7 +156,8 @@ export default function DashboardPage() {
       categoriasRes.error ||
       mediosRes.error ||
       personasRes.error ||
-      cuentasRes.error
+      cuentasRes.error ||
+      tarjetasRes.error
     ) {
       const primerError =
         gastosRes.error ??
@@ -143,7 +166,8 @@ export default function DashboardPage() {
         categoriasRes.error ??
         mediosRes.error ??
         personasRes.error ??
-        cuentasRes.error;
+        cuentasRes.error ??
+        tarjetasRes.error;
 
       console.error(primerError);
       setError('No se pudo cargar el dashboard. Revisá la conexión con Supabase.');
@@ -159,6 +183,7 @@ export default function DashboardPage() {
     setMediosPago(new Map(((mediosRes.data ?? []) as MedioPago[]).map((m) => [m.id, m.nombre])));
     setPersonas(new Map(((personasRes.data ?? []) as Persona[]).map((p) => [p.id, `${p.nombre} ${p.apellido ?? ''}`.trim()])));
     setCuentasTarjeta(new Map(((cuentasRes.data ?? []) as CuentaTarjeta[]).map((c) => [c.id, c.nombre_cuenta])));
+    setTarjetasFisicas(new Map(((tarjetasRes.data ?? []) as TarjetaFisica[]).map((t) => [t.id, `${t.alias}${t.numero_ultimos4 ? ` · ${t.numero_ultimos4}` : ''}`])));
 
     setCargando(false);
   }
@@ -225,6 +250,22 @@ export default function DashboardPage() {
     return Array.from(acumulado.values()).sort((a, b) => b.total - a.total);
   }, [cuotasMes, cuentasTarjeta]);
 
+  const cuotasAgrupadasPorCuenta = useMemo(() => {
+    const acumulado = new Map<string, CuotaTarjeta[]>();
+    for (const cuota of cuotasMes) {
+      const key = cuota.cuenta_tarjeta_id;
+      const actuales = acumulado.get(key) ?? [];
+      actuales.push(cuota);
+      acumulado.set(key, actuales);
+    }
+    return Array.from(acumulado.entries()).map(([cuentaId, cuotas]) => ({
+      cuentaId,
+      nombreCuenta: cuentasTarjeta.get(cuentaId) ?? 'Cuenta desconocida',
+      cuotas: cuotas.sort((a, b) => a.numero_cuota - b.numero_cuota || a.establecimiento.localeCompare(b.establecimiento)),
+      total: cuotas.reduce((acc, cuota) => acc + cuota.monto_cuota, 0),
+    })).sort((a, b) => b.total - a.total);
+  }, [cuotasMes, cuentasTarjeta]);
+
   return (
     <section className="space-y-6">
       <header className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -255,8 +296,58 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <CardMetrica titulo="Cuotas visibles" valor={String(cuotasMes.length)} subtitulo="Cuotas pendientes del mes" />
+        <CardMetrica
+          titulo="Cuotas visibles"
+          valor={String(cuotasMes.length)}
+          subtitulo={detalleCuotasAbierto ? 'Click para ocultar detalle' : 'Click para ver detalle'}
+          esInteractiva
+          onClick={() => setDetalleCuotasAbierto((valorActual) => !valorActual)}
+        />
       </div>
+
+      {detalleCuotasAbierto ? (
+        <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Cuotas pendientes de {formatearPeriodoLargo(mesSeleccionado)}</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                {cuotasMes.length} cuotas · Total {formatearMonto(totalReservarMes)}
+              </p>
+            </div>
+          </div>
+          {cuotasMes.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">No hay cuotas pendientes para este mes.</p>
+          ) : (
+            <div className="mt-4 space-y-4">
+              {cuotasAgrupadasPorCuenta.map((grupo) => (
+                <section key={grupo.cuentaId} className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-slate-800">{grupo.nombreCuenta}</h3>
+                    <span className={badgeBase()}>{grupo.cuotas.length} cuotas · {formatearMonto(grupo.total)}</span>
+                  </div>
+                  <ul className="space-y-2">
+                    {grupo.cuotas.map((cuota) => (
+                      <li key={cuota.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-sm">
+                        <div className="grid gap-1 sm:grid-cols-2">
+                          <p><span className="font-medium">Establecimiento:</span> {cuota.establecimiento}</p>
+                          <p><span className="font-medium">Descripción:</span> {cuota.descripcion_cuota}</p>
+                          <p><span className="font-medium">Tarjeta física:</span> {cuota.tarjeta_fisica_id ? (tarjetasFisicas.get(cuota.tarjeta_fisica_id) ?? 'Sin dato') : 'Sin tarjeta específica'}</p>
+                          <p><span className="font-medium">Persona:</span> {personas.get(cuota.persona_id) ?? 'Sin dato'}</p>
+                          <p><span className="font-medium">Cuota:</span> {cuota.numero_cuota}/{cuota.total_cuotas}</p>
+                          <p><span className="font-medium">Monto:</span> {formatearMonto(cuota.monto_cuota)}</p>
+                          <p><span className="font-medium">Origen:</span> {cuota.origen_cuota}</p>
+                          <p><span className="font-medium">Estado:</span> {cuota.estado}</p>
+                        </div>
+                        {cuota.observaciones ? <p className="mt-2 text-xs text-slate-600"><span className="font-medium">Observaciones:</span> {cuota.observaciones}</p> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          )}
+        </article>
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <CardListado titulo="Gastos por categoría" filas={porCategoria} vacio="Todavía no hay gastos registrados para este mes." />
@@ -271,9 +362,15 @@ export default function DashboardPage() {
   );
 }
 
-function CardMetrica({ titulo, valor, subtitulo }: { titulo: string; valor: string; subtitulo: string }) {
+function CardMetrica({ titulo, valor, subtitulo, esInteractiva = false, onClick }: { titulo: string; valor: string; subtitulo: string; esInteractiva?: boolean; onClick?: () => void }) {
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <article
+      onClick={onClick}
+      className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ${esInteractiva ? 'cursor-pointer transition hover:border-slate-400 hover:shadow' : ''}`}
+      role={esInteractiva ? 'button' : undefined}
+      tabIndex={esInteractiva ? 0 : undefined}
+      onKeyDown={esInteractiva ? (e) => { if (e.key === 'Enter' || e.key === ' ') onClick?.(); } : undefined}
+    >
       <p className="text-sm text-slate-600">{titulo}</p>
       <p className="mt-2 text-2xl font-semibold text-slate-900">{valor}</p>
       <p className="mt-1 text-xs text-slate-500">{subtitulo}</p>
