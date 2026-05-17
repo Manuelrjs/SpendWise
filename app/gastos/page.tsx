@@ -157,16 +157,40 @@ export default function Page() {
     const nuevoTarjeta = esMedioTarjetaCredito(gastoEditando.medio_pago_id);
 
     if (tieneCuotas && original.medio_pago_id !== gastoEditando.medio_pago_id) return setError('Este gasto tiene cuotas generadas. Para cambiar el medio de pago, anulá el gasto y cargalo nuevamente.');
-    if (!originalTarjeta && nuevoTarjeta) return setError('Para convertir este gasto a tarjeta de crédito y generar cuotas, anulá este gasto y cargalo nuevamente desde Nuevo gasto.');
+    if (!originalTarjeta && nuevoTarjeta && gastoEditando.cantidad_cuotas > 1) return setError('Para convertir este gasto a tarjeta de crédito en cuotas, anulá este gasto y cargalo nuevamente desde Nuevo gasto.');
     if (tieneCuotas && original.cuenta_tarjeta_id !== gastoEditando.cuenta_tarjeta_id) return setError('Para cambiar la cuenta de tarjeta de un gasto con cuotas, anulá el gasto y cargalo nuevamente.');
     if (nuevoTarjeta && (!gastoEditando.cuenta_tarjeta_id || !gastoEditando.tarjeta_fisica_id)) return setError('Para un gasto con tarjeta de crédito, debés seleccionar cuenta de tarjeta y tarjeta física.');
+    if (nuevoTarjeta && gastoEditando.tarjeta_fisica_id) {
+      const tarjetaValida = tarjetasFisicas.some((t) => t.id === gastoEditando.tarjeta_fisica_id && t.cuenta_tarjeta_id === gastoEditando.cuenta_tarjeta_id);
+      if (!tarjetaValida) return setError('La tarjeta física seleccionada no pertenece a la cuenta elegida.');
+    }
 
     const payload = {
       establecimiento: gastoEditando.establecimiento.trim(), categoria_id: gastoEditando.categoria_id, persona_id: gastoEditando.persona_id, descripcion: gastoEditando.descripcion, observaciones: gastoEditando.observaciones,
-      ...(tieneCuotas ? { tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id } : { fecha_gasto: gastoEditando.fecha_gasto, monto: gastoEditando.monto, medio_pago_id: gastoEditando.medio_pago_id, cuenta_tarjeta_id: nuevoTarjeta ? gastoEditando.cuenta_tarjeta_id : null, tarjeta_fisica_id: nuevoTarjeta ? gastoEditando.tarjeta_fisica_id : null, cantidad_cuotas: nuevoTarjeta ? gastoEditando.cantidad_cuotas : 1 }),
+      ...(tieneCuotas ? { tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id } : { fecha_gasto: gastoEditando.fecha_gasto, monto: gastoEditando.monto, medio_pago_id: gastoEditando.medio_pago_id, cuenta_tarjeta_id: nuevoTarjeta ? gastoEditando.cuenta_tarjeta_id : null, tarjeta_fisica_id: nuevoTarjeta ? gastoEditando.tarjeta_fisica_id : null, cantidad_cuotas: nuevoTarjeta ? 1 : 1 }),
     };
     const { error: e } = await supabase.from('gastos').update(payload).eq('id', gastoEditando.id);
     if (e) return setError('No se pudo guardar la edición.');
+    if (!tieneCuotas && !originalTarjeta && nuevoTarjeta) {
+      const periodo = gastoEditando.fecha_gasto.slice(0, 7);
+      const { error: cuotaError } = await supabase.from('cuotas_tarjeta').insert({
+        gasto_id: gastoEditando.id,
+        cuenta_tarjeta_id: gastoEditando.cuenta_tarjeta_id,
+        tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id,
+        persona_id: gastoEditando.persona_id,
+        establecimiento: gastoEditando.establecimiento,
+        descripcion_cuota: gastoEditando.descripcion?.trim() || gastoEditando.establecimiento,
+        numero_cuota: 1,
+        total_cuotas: 1,
+        monto_cuota: gastoEditando.monto,
+        moneda: gastoEditando.moneda,
+        periodo_pago_estimado: periodo,
+        estado: 'pendiente',
+        origen_cuota: 'gasto',
+        observaciones: gastoEditando.observaciones?.trim() || null,
+      });
+      if (cuotaError) return setError('No se pudo generar la cuota 1/1 para el gasto convertido a tarjeta de crédito.');
+    }
     if (tieneCuotas) {
       if (original.persona_id !== gastoEditando.persona_id) await supabase.from('cuotas_tarjeta').update({ persona_id: gastoEditando.persona_id }).eq('gasto_id', gastoEditando.id).not('estado', 'in', '("pagada","cancelada")');
       if (original.tarjeta_fisica_id !== gastoEditando.tarjeta_fisica_id) await supabase.from('cuotas_tarjeta').update({ tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id }).eq('gasto_id', gastoEditando.id).not('estado', 'in', '("pagada","cancelada")');
@@ -223,24 +247,25 @@ export default function Page() {
     {gastoEditando && <form onSubmit={guardarEdicion} className="space-y-2 rounded-2xl border bg-white p-4">
       <h2 className="font-semibold">Editar gasto</h2>
       {cuotasGastoEditando.length > 0 && <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">Este gasto tiene cuotas generadas. Para corregir monto, fecha, medio de pago o cantidad de cuotas, anulá el gasto y cargalo nuevamente.</p>}
-      <input type="date" disabled={cuotasGastoEditando.length > 0} value={gastoEditando.fecha_gasto} onChange={(e) => setGastoEditando((p) => p ? { ...p, fecha_gasto: e.target.value } : null)} className="rounded-xl border px-3 py-2" />
-      <input value={gastoEditando.establecimiento} onChange={(e) => setGastoEditando((p) => p ? { ...p, establecimiento: e.target.value } : null)} className="rounded-xl border px-3 py-2" />
+      <label className="block text-sm font-medium">Fecha del gasto<input type="date" disabled={cuotasGastoEditando.length > 0} value={gastoEditando.fecha_gasto} onChange={(e) => setGastoEditando((p) => p ? { ...p, fecha_gasto: e.target.value } : null)} className="mt-1 w-full rounded-xl border px-3 py-2 disabled:bg-slate-100" /></label>
+      <label className="block text-sm font-medium">Establecimiento<input value={gastoEditando.establecimiento} onChange={(e) => setGastoEditando((p) => p ? { ...p, establecimiento: e.target.value } : null)} className="mt-1 w-full rounded-xl border px-3 py-2" /></label>
       {renderSelect('Categoría', gastoEditando.categoria_id, categorias, (v) => setGastoEditando((p) => p ? { ...p, categoria_id: v } : null))}
       {renderSelect('Persona', gastoEditando.persona_id, personas.map((p) => ({ id: p.id, nombre: `${p.nombre} ${p.apellido ?? ''}`.trim() })), (v) => setGastoEditando((p) => p ? { ...p, persona_id: v } : null))}
       {renderSelect('Medio de pago', gastoEditando.medio_pago_id, mediosPago, (v) => setGastoEditando((p) => {
         if (!p) return null;
         const medioEsTarjeta = esMedioTarjetaCredito(v);
-        return { ...p, medio_pago_id: v, cuenta_tarjeta_id: medioEsTarjeta ? p.cuenta_tarjeta_id : null, tarjeta_fisica_id: medioEsTarjeta ? p.tarjeta_fisica_id : null, cantidad_cuotas: medioEsTarjeta ? p.cantidad_cuotas : 1 };
+        return { ...p, medio_pago_id: v, cuenta_tarjeta_id: medioEsTarjeta ? p.cuenta_tarjeta_id : null, tarjeta_fisica_id: medioEsTarjeta ? p.tarjeta_fisica_id : null, cantidad_cuotas: 1 };
       }), gastoEditandoTieneCuotas)}
       {gastoEditandoEsTarjeta ? (
         <>
           {renderSelect('Cuenta de tarjeta', gastoEditando.cuenta_tarjeta_id ?? '', cuentasTarjeta.map((c) => ({ id: c.id, nombre: c.nombre_cuenta })), (v) => setGastoEditando((p) => p ? { ...p, cuenta_tarjeta_id: v || null, tarjeta_fisica_id: null } : null), gastoEditandoTieneCuotas)}
-          {renderSelect('Tarjeta física', gastoEditando.tarjeta_fisica_id ?? '', tarjetasDisponiblesEdicion, (v) => setGastoEditando((p) => p ? { ...p, tarjeta_fisica_id: v || null } : null))}
+          {renderSelect('Tarjeta física', gastoEditando.tarjeta_fisica_id ?? '', tarjetasDisponiblesEdicion, (v) => setGastoEditando((p) => p ? { ...p, tarjeta_fisica_id: v || null } : null), gastoEditandoTieneCuotas)}
         </>
       ) : null}
-      <input type="number" disabled={cuotasGastoEditando.length > 0} value={gastoEditando.monto} onChange={(e) => setGastoEditando((p) => p ? { ...p, monto: Number(e.target.value) } : null)} className="rounded-xl border px-3 py-2" />
-      <textarea value={gastoEditando.descripcion ?? ''} onChange={(e) => setGastoEditando((p) => p ? { ...p, descripcion: e.target.value } : null)} className="rounded-xl border px-3 py-2" />
-      <textarea value={gastoEditando.observaciones ?? ''} onChange={(e) => setGastoEditando((p) => p ? { ...p, observaciones: e.target.value } : null)} className="rounded-xl border px-3 py-2" />
+      <label className="block text-sm font-medium">Monto<input type="number" disabled={cuotasGastoEditando.length > 0} value={gastoEditando.monto} onChange={(e) => setGastoEditando((p) => p ? { ...p, monto: Number(e.target.value) } : null)} className="mt-1 w-full rounded-xl border px-3 py-2 disabled:bg-slate-100" /></label>
+      <label className="block text-sm font-medium">Descripción<textarea value={gastoEditando.descripcion ?? ''} onChange={(e) => setGastoEditando((p) => p ? { ...p, descripcion: e.target.value } : null)} className="mt-1 w-full rounded-xl border px-3 py-2" /></label>
+      <label className="block text-sm font-medium">Observaciones<textarea value={gastoEditando.observaciones ?? ''} onChange={(e) => setGastoEditando((p) => p ? { ...p, observaciones: e.target.value } : null)} className="mt-1 w-full rounded-xl border px-3 py-2" /></label>
+      {gastoEditandoTieneCuotas ? <p className="text-xs text-slate-500">Medio de pago, fecha y monto están bloqueados para mantener consistencia con cuotas generadas.</p> : null}
       <button className="rounded-xl bg-emerald-600 px-3 py-2 text-white">Guardar cambios</button>
 
       <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Cuotas asociadas</h3>
@@ -263,5 +288,5 @@ export default function Page() {
 }
 
 function renderSelect(label: string, value: string, options: OpcionBase[], onChange: (value: string) => void, disabled = false) {
-  return <select aria-label={label} disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)} className="rounded-xl border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100"><option value="">{label}</option>{options.map((option) => <option key={option.id} value={option.id}>{option.nombre}</option>)}</select>;
+  return <label className="block text-sm font-medium">{label}<select aria-label={label} disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100"><option value="">Seleccionar</option>{options.map((option) => <option key={option.id} value={option.id}>{option.nombre}</option>)}</select></label>;
 }
