@@ -53,6 +53,25 @@ type Filtros = {
   cuentaTarjetaId: string;
   personaId: string;
   origenCuota: string;
+  medioPagoId: string;
+};
+
+type MedioPago = { id: string; nombre: string; tipo: string; activo: boolean };
+
+type GastoDirecto = {
+  id: string;
+  fecha_gasto: string;
+  monto: number;
+  moneda: string;
+  establecimiento: string;
+  descripcion: string | null;
+  observaciones: string | null;
+  persona_id: string | null;
+  medio_pago_id: string | null;
+  categoria: { nombre: string } | null;
+  persona: { nombre: string; apellido: string | null } | null;
+  medio_pago: { nombre: string; tipo: string } | null;
+  estado_registro: string;
 };
 
 const ESTADOS_INCLUIDOS = ['pendiente', 'proyectada', 'incluida_resumen', 'no_incluida', 'reprogramada'];
@@ -89,6 +108,13 @@ function obtenerPeriodoActual() {
   return `${hoy.getUTCFullYear()}-${String(hoy.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+function obtenerPeriodoDesdeFecha(fecha: string) {
+  const valor = fecha.slice(0, 10);
+  const [anio, mes] = valor.split('-');
+  if (!anio || !mes) return '';
+  return `${anio}-${mes}`;
+}
+
 
 function obtenerClaveGrupo(cuota: CuotaTarjeta) {
   if (cuota.gasto_id) return `gasto:${cuota.gasto_id}`;
@@ -121,9 +147,11 @@ export default function FlujoPage() {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [tarjetas, setTarjetas] = useState<TarjetaFisica[]>([]);
   const [cuotas, setCuotas] = useState<CuotaTarjeta[]>([]);
+  const [mediosPago, setMediosPago] = useState<MedioPago[]>([]);
+  const [gastosDirectos, setGastosDirectos] = useState<GastoDirecto[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [celdaActiva, setCeldaActiva] = useState<{ cuentaTarjetaId: string; periodo: string } | null>(null);
+  const [celdaActiva, setCeldaActiva] = useState<{ tipo: 'tarjeta' | 'gasto_directo'; clave: string; periodo: string } | null>(null);
   const [mostrarDesglose, setMostrarDesglose] = useState(false);
 
   const [filtros, setFiltros] = useState<Filtros>({
@@ -132,6 +160,7 @@ export default function FlujoPage() {
     cuentaTarjetaId: '',
     personaId: '',
     origenCuota: '',
+    medioPagoId: '',
   });
 
   useEffect(() => {
@@ -142,7 +171,7 @@ export default function FlujoPage() {
     setCargando(true);
     setError(null);
 
-    const [cuentasRes, personasRes, tarjetasRes, cuotasRes] = await Promise.all([
+    const [cuentasRes, personasRes, tarjetasRes, cuotasRes, mediosPagoRes, gastosRes] = await Promise.all([
       supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,activo').eq('activo', true).order('nombre_cuenta'),
       supabase.from('personas').select('id,nombre,apellido').order('nombre'),
       supabase.from('tarjetas_fisicas').select('id,alias,tipo,ultimos_4_digitos').order('alias'),
@@ -150,10 +179,15 @@ export default function FlujoPage() {
         .from('cuotas_tarjeta')
         .select('id,gasto_id,compra_cuota_inicial_id,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,establecimiento,descripcion_cuota,numero_cuota,total_cuotas,monto_cuota,moneda,periodo_pago_estimado,estado,origen_cuota,observaciones')
         .not('estado', 'in', '(cancelada)'),
+      supabase.from('medios_pago').select('id,nombre,tipo,activo').eq('activo', true).order('nombre'),
+      supabase
+        .from('gastos')
+        .select('id,fecha_gasto,monto,moneda,establecimiento,descripcion,observaciones,persona_id,medio_pago_id,estado_registro,categoria:categorias(nombre),persona:personas(nombre,apellido),medio_pago:medios_pago(nombre,tipo)')
+        .neq('estado_registro', 'anulado'),
     ]);
 
-    if (cuentasRes.error || personasRes.error || tarjetasRes.error || cuotasRes.error) {
-      const primerError = cuentasRes.error ?? personasRes.error ?? tarjetasRes.error ?? cuotasRes.error;
+    if (cuentasRes.error || personasRes.error || tarjetasRes.error || cuotasRes.error || mediosPagoRes.error || gastosRes.error) {
+      const primerError = cuentasRes.error ?? personasRes.error ?? tarjetasRes.error ?? cuotasRes.error ?? mediosPagoRes.error ?? gastosRes.error;
       console.error(primerError);
       setError('No se pudo cargar el flujo mensual. Revisá la conexión con Supabase.');
       setCargando(false);
@@ -164,6 +198,8 @@ export default function FlujoPage() {
     setPersonas((personasRes.data ?? []) as Persona[]);
     setTarjetas((tarjetasRes.data ?? []) as TarjetaFisica[]);
     setCuotas((cuotasRes.data ?? []) as CuotaTarjeta[]);
+    setMediosPago((mediosPagoRes.data ?? []) as MedioPago[]);
+    setGastosDirectos((gastosRes.data ?? []) as GastoDirecto[]);
     setCargando(false);
   }
 
@@ -180,6 +216,7 @@ export default function FlujoPage() {
     () => new Map(tarjetas.map((t) => [t.id, `${t.alias ?? t.tipo}${t.ultimos_4_digitos ? ` • ${t.ultimos_4_digitos}` : ''}`])),
     [tarjetas],
   );
+  const nombresMediosPago = useMemo(() => new Map(mediosPago.map((medio) => [medio.id, medio.nombre])), [mediosPago]);
 
   const cuotasFiltradas = useMemo(
     () =>
@@ -197,6 +234,34 @@ export default function FlujoPage() {
     () => cuotasFiltradas.filter((cuota) => ESTADOS_INCLUIDOS.includes(cuota.estado) && !ESTADOS_EXCLUIDOS.includes(cuota.estado)),
     [cuotasFiltradas],
   );
+  const gastosDirectosFiltrados = useMemo(
+    () =>
+      gastosDirectos.filter((gasto) => {
+        const tipoMedio = gasto.medio_pago?.tipo ?? '';
+        if (tipoMedio === 'tarjeta_credito') return false;
+        const periodo = obtenerPeriodoDesdeFecha(gasto.fecha_gasto);
+        if (!periodos.includes(periodo)) return false;
+        if (filtros.personaId && gasto.persona_id !== filtros.personaId) return false;
+        if (filtros.medioPagoId && gasto.medio_pago_id !== filtros.medioPagoId) return false;
+        return true;
+      }),
+    [gastosDirectos, filtros.medioPagoId, filtros.personaId, periodos],
+  );
+
+  const matrizGastosDirectos = useMemo(() => {
+    const base = new Map<string, Map<string, number>>();
+    for (const medio of mediosPago) {
+      if (medio.tipo === 'tarjeta_credito') continue;
+      base.set(medio.id, new Map(periodos.map((periodo) => [periodo, 0])));
+    }
+    for (const gasto of gastosDirectosFiltrados) {
+      if (!gasto.medio_pago_id || !base.has(gasto.medio_pago_id)) continue;
+      const periodo = obtenerPeriodoDesdeFecha(gasto.fecha_gasto);
+      const fila = base.get(gasto.medio_pago_id)!;
+      fila.set(periodo, (fila.get(periodo) ?? 0) + gasto.monto);
+    }
+    return base;
+  }, [gastosDirectosFiltrados, mediosPago, periodos]);
 
   const matriz = useMemo(() => {
     const base = new Map<string, Map<string, number>>();
@@ -218,15 +283,47 @@ export default function FlujoPage() {
       return periodos.some((periodo) => (matriz.get(cuenta.id)?.get(periodo) ?? 0) > 0);
     });
   }, [cuentas, filtros.cuentaTarjetaId, matriz, periodos]);
+  const mediosPagoVisibles = useMemo(
+    () =>
+      mediosPago.filter((medio) => {
+        if (medio.tipo === 'tarjeta_credito') return false;
+        if (filtros.medioPagoId && medio.id !== filtros.medioPagoId) return false;
+        return periodos.some((periodo) => (matrizGastosDirectos.get(medio.id)?.get(periodo) ?? 0) > 0);
+      }),
+    [filtros.medioPagoId, matrizGastosDirectos, mediosPago, periodos],
+  );
+
+  const totalesTarjetaPorMes = useMemo(() => {
+    const totales = new Map<string, number>();
+    for (const periodo of periodos) {
+      totales.set(
+        periodo,
+        cuentasVisibles.reduce((acc, cuenta) => acc + (matriz.get(cuenta.id)?.get(periodo) ?? 0), 0),
+      );
+    }
+    return totales;
+  }, [cuentasVisibles, matriz, periodos]);
+
+  const totalesGastosDirectosPorMes = useMemo(() => {
+    const totales = new Map<string, number>();
+    for (const periodo of periodos) {
+      totales.set(
+        periodo,
+        mediosPagoVisibles.reduce((acc, medio) => acc + (matrizGastosDirectos.get(medio.id)?.get(periodo) ?? 0), 0),
+      );
+    }
+    return totales;
+  }, [matrizGastosDirectos, mediosPagoVisibles, periodos]);
 
   const totalesPorMes = useMemo(() => {
     const totales = new Map<string, number>();
     for (const periodo of periodos) {
-      const total = cuentasVisibles.reduce((acc, cuenta) => acc + (matriz.get(cuenta.id)?.get(periodo) ?? 0), 0);
-      totales.set(periodo, total);
+      const totalTarjetas = totalesTarjetaPorMes.get(periodo) ?? 0;
+      const totalDirectos = totalesGastosDirectosPorMes.get(periodo) ?? 0;
+      totales.set(periodo, totalTarjetas + totalDirectos);
     }
     return totales;
-  }, [cuentasVisibles, matriz, periodos]);
+  }, [periodos, totalesGastosDirectosPorMes, totalesTarjetaPorMes]);
 
   const totalGeneralVisible = useMemo(
     () => periodos.reduce((acc, periodo) => acc + (totalesPorMes.get(periodo) ?? 0), 0),
@@ -235,19 +332,26 @@ export default function FlujoPage() {
 
   const totalMesActual = totalesPorMes.get(periodos[0]) ?? 0;
   const totalProximoMes = totalesPorMes.get(periodos[1]) ?? 0;
+  const totalTarjetasMesActual = totalesTarjetaPorMes.get(periodos[0]) ?? 0;
+  const totalDirectosMesActual = totalesGastosDirectosPorMes.get(periodos[0]) ?? 0;
   const cuotasPendientesVisibles = cuotasParaSuma.length;
 
   const cuentaActiva = useMemo(() => {
-    if (!celdaActiva) return null;
-    return cuentas.find((cuenta) => cuenta.id === celdaActiva.cuentaTarjetaId) ?? null;
+    if (!celdaActiva || celdaActiva.tipo !== 'tarjeta') return null;
+    return cuentas.find((cuenta) => cuenta.id === celdaActiva.clave) ?? null;
   }, [celdaActiva, cuentas]);
 
   const detalleCelda = useMemo(() => {
     if (!celdaActiva) return [];
-    return cuotasFiltradas.filter(
-      (cuota) => cuota.cuenta_tarjeta_id === celdaActiva.cuentaTarjetaId && cuota.periodo_pago_estimado === celdaActiva.periodo,
-    );
+    if (celdaActiva.tipo !== 'tarjeta') return [];
+    return cuotasFiltradas.filter((cuota) => cuota.cuenta_tarjeta_id === celdaActiva.clave && cuota.periodo_pago_estimado === celdaActiva.periodo);
   }, [celdaActiva, cuotasFiltradas]);
+  const detalleDirectoCelda = useMemo(() => {
+    if (!celdaActiva || celdaActiva.tipo !== 'gasto_directo') return [];
+    return gastosDirectosFiltrados.filter(
+      (gasto) => gasto.medio_pago_id === celdaActiva.clave && obtenerPeriodoDesdeFecha(gasto.fecha_gasto) === celdaActiva.periodo,
+    );
+  }, [celdaActiva, gastosDirectosFiltrados]);
 
   const desglosePorCuenta = useMemo(() => {
     const porCuenta = new Map<string, GrupoCompra[]>();
@@ -305,13 +409,13 @@ export default function FlujoPage() {
     return porCuenta;
   }, [cuotasParaSuma, cuentasVisibles, periodos]);
 
-  const manejarClickCelda = (cuentaTarjetaId: string, periodo: string, monto: number) => {
+  const manejarClickCelda = (tipo: 'tarjeta' | 'gasto_directo', clave: string, periodo: string, monto: number) => {
     if (monto <= 0) return;
     setCeldaActiva((actual) => {
-      if (actual?.cuentaTarjetaId === cuentaTarjetaId && actual.periodo === periodo) {
+      if (actual?.tipo === tipo && actual.clave === clave && actual.periodo === periodo) {
         return null;
       }
-      return { cuentaTarjetaId, periodo };
+      return { tipo, clave, periodo };
     });
   };
 
@@ -319,17 +423,18 @@ export default function FlujoPage() {
     <section className="space-y-4">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold">Flujo mensual de pagos</h1>
-        <p className="text-sm text-slate-600">Proyección por cuenta de tarjeta basada en cuotas_tarjeta y período estimado de pago.</p>
+        <p className="text-sm text-slate-600">Proyección de salidas mensuales por gastos directos y pagos de tarjeta.</p>
       </header>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-        <CardTitulo titulo="Total a reservar este mes" valor={formatearMonto(totalMesActual, 'ARS')} destacado />
-        <CardTitulo titulo="Total próximo mes" valor={formatearMonto(totalProximoMes, 'ARS')} />
-        <CardTitulo titulo="Cuentas con cuotas" valor={String(cuentasVisibles.length)} />
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+        <CardTitulo titulo="Total salida este mes" valor={formatearMonto(totalMesActual, 'ARS')} destacado />
+        <CardTitulo titulo="Tarjetas a reservar este mes" valor={formatearMonto(totalTarjetasMesActual, 'ARS')} />
+        <CardTitulo titulo="Gastos directos este mes" valor={formatearMonto(totalDirectosMesActual, 'ARS')} />
+        <CardTitulo titulo="Comprometido próximo mes" valor={formatearMonto(totalProximoMes, 'ARS')} />
         <CardTitulo titulo="Cuotas pendientes visibles" valor={String(cuotasPendientesVisibles)} />
       </div>
 
-      <div className="grid grid-cols-1 gap-2 rounded-2xl border bg-white p-3 md:grid-cols-5">
+      <div className="grid grid-cols-1 gap-2 rounded-2xl border bg-white p-3 md:grid-cols-6">
         <input type="month" value={filtros.mesInicial} onChange={(e) => setFiltros((p) => ({ ...p, mesInicial: e.target.value }))} className="rounded-xl border px-3 py-2 text-sm" />
         <select value={filtros.cantidadMeses} onChange={(e) => setFiltros((p) => ({ ...p, cantidadMeses: Number(e.target.value) as 3 | 6 | 12 }))} className="rounded-xl border px-3 py-2 text-sm">
           <option value={3}>3 meses</option>
@@ -348,6 +453,10 @@ export default function FlujoPage() {
           <option value="">Todos los orígenes</option>
           <option value="gasto_nuevo">gasto_nuevo</option><option value="carga_inicial">carga_inicial</option><option value="importacion">importacion</option><option value="ajuste_manual">ajuste_manual</option><option value="conciliacion">conciliacion</option>
         </select>
+        <select value={filtros.medioPagoId} onChange={(e) => setFiltros((p) => ({ ...p, medioPagoId: e.target.value }))} className="rounded-xl border px-3 py-2 text-sm">
+          <option value="">Todos los medios de pago</option>
+          {mediosPago.filter((medio) => medio.tipo !== 'tarjeta_credito').map((medio) => <option key={medio.id} value={medio.id}>{medio.nombre}</option>)}
+        </select>
       </div>
       <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-medium text-slate-700">
         <input
@@ -362,11 +471,11 @@ export default function FlujoPage() {
       {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
       {cargando && <p className="rounded-xl border bg-white px-3 py-2 text-sm">Cargando flujo mensual...</p>}
 
-      {!cargando && !error && cuentasVisibles.length === 0 && (
-        <p className="rounded-xl border bg-white px-3 py-3 text-sm">Todavía no hay cuotas proyectadas para este período.</p>
+      {!cargando && !error && cuentasVisibles.length === 0 && mediosPagoVisibles.length === 0 && (
+        <p className="rounded-xl border bg-white px-3 py-3 text-sm">Todavía no hay salidas proyectadas para este período.</p>
       )}
 
-      {!cargando && !error && cuentasVisibles.length > 0 && (
+      {!cargando && !error && (cuentasVisibles.length > 0 || mediosPagoVisibles.length > 0) && (
         <>
           <div className="hidden overflow-x-auto rounded-2xl border bg-white md:block">
             <table className="min-w-full text-sm">
@@ -381,6 +490,21 @@ export default function FlujoPage() {
                 </tr>
               </thead>
               <tbody>
+                {mediosPagoVisibles.map((medio) => {
+                  const totalMedio = periodos.reduce((acc, periodo) => acc + (matrizGastosDirectos.get(medio.id)?.get(periodo) ?? 0), 0);
+                  return <tr key={medio.id} className="border-t bg-amber-50/40">
+                    <td className="px-3 py-2 font-medium">Gasto directo · {medio.nombre}</td>
+                    <td className="px-3 py-2 text-slate-400">—</td>
+                    <td className="px-3 py-2 text-right text-slate-400">—</td>
+                    <td className="px-3 py-2 text-right text-slate-400">—</td>
+                    {periodos.map((periodo) => {
+                      const monto = matrizGastosDirectos.get(medio.id)?.get(periodo) ?? 0;
+                      const activa = celdaActiva?.tipo === 'gasto_directo' && celdaActiva.clave === medio.id && celdaActiva.periodo === periodo;
+                      return <td key={periodo} className="px-3 py-2 text-right tabular-nums"><button onClick={() => manejarClickCelda('gasto_directo', medio.id, periodo, monto)} className={`w-full rounded-lg px-2 py-1 text-right transition ${activa ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300' : 'hover:bg-slate-100'}`} disabled={monto <= 0}>{monto > 0 ? formatearMonto(monto, 'ARS') : '—'}</button></td>;
+                    })}
+                    <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatearMonto(totalMedio, 'ARS')}</td>
+                  </tr>;
+                })}
                 {cuentasVisibles.map((cuenta) => {
                   const totalCuenta = periodos.reduce((acc, periodo) => acc + (matriz.get(cuenta.id)?.get(periodo) ?? 0), 0);
                   const gruposCuenta = desglosePorCuenta.get(cuenta.id) ?? [];
@@ -394,11 +518,11 @@ export default function FlujoPage() {
                         <td className="px-3 py-2 text-right text-slate-400">—</td>
                         {periodos.map((periodo) => {
                           const monto = matriz.get(cuenta.id)?.get(periodo) ?? 0;
-                          const activa = celdaActiva?.cuentaTarjetaId === cuenta.id && celdaActiva.periodo === periodo;
+                          const activa = celdaActiva?.tipo === 'tarjeta' && celdaActiva.clave === cuenta.id && celdaActiva.periodo === periodo;
                           return (
                             <td key={periodo} className="px-3 py-2 text-right tabular-nums">
                               <button
-                                onClick={() => manejarClickCelda(cuenta.id, periodo, monto)}
+                                onClick={() => manejarClickCelda('tarjeta', cuenta.id, periodo, monto)}
                                 className={`w-full rounded-lg px-2 py-1 text-right transition ${activa ? 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300' : 'hover:bg-slate-100'}`}
                                 disabled={monto <= 0}
                               >
@@ -446,13 +570,24 @@ export default function FlujoPage() {
           </div>
 
           <div className="space-y-3 md:hidden">
+            {mediosPagoVisibles.map((medio) => (
+              <article key={medio.id} className="rounded-2xl border bg-amber-50/50 p-3">
+                <h3 className="font-semibold">Gasto directo · {medio.nombre}</h3>
+                <div className="mt-2 space-y-2">
+                  {periodos.map((periodo) => {
+                    const monto = matrizGastosDirectos.get(medio.id)?.get(periodo) ?? 0;
+                    return <button key={periodo} onClick={() => manejarClickCelda('gasto_directo', medio.id, periodo, monto)} className="flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm"><span>{periodo}</span><span className="font-semibold">{monto > 0 ? formatearMonto(monto, 'ARS') : '—'}</span></button>;
+                  })}
+                </div>
+              </article>
+            ))}
             {cuentasVisibles.map((cuenta) => (
               <article key={cuenta.id} className="rounded-2xl border bg-white p-3">
                 <h3 className="font-semibold">{cuenta.nombre_cuenta}</h3>
                 <div className="mt-2 space-y-2">
                   {periodos.map((periodo) => {
                     const monto = matriz.get(cuenta.id)?.get(periodo) ?? 0;
-                    return <button key={periodo} onClick={() => manejarClickCelda(cuenta.id, periodo, monto)} className="flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm"><span>{periodo}</span><span className="font-semibold">{monto > 0 ? formatearMonto(monto, 'ARS') : '—'}</span></button>;
+                    return <button key={periodo} onClick={() => manejarClickCelda('tarjeta', cuenta.id, periodo, monto)} className="flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm"><span>{periodo}</span><span className="font-semibold">{monto > 0 ? formatearMonto(monto, 'ARS') : '—'}</span></button>;
                   })}
                 </div>
                 {mostrarDesglose && (
@@ -469,12 +604,13 @@ export default function FlujoPage() {
       {celdaActiva && (
         <section className="space-y-2 rounded-2xl border bg-white p-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Detalle de {cuentaActiva?.nombre_cuenta ?? 'Cuenta'} · {celdaActiva.periodo}</h2>
+            <h2 className="text-lg font-semibold">Detalle de {celdaActiva.tipo === 'tarjeta' ? cuentaActiva?.nombre_cuenta ?? 'Cuenta' : `Gasto directo · ${nombresMediosPago.get(celdaActiva.clave) ?? 'Medio de pago'}`} · {celdaActiva.periodo}</h2>
             <button onClick={() => setCeldaActiva(null)} className="rounded-lg border px-2 py-1 text-xs">Cerrar</button>
           </div>
-          {detalleCelda.length === 0 ? <p className="text-sm text-slate-600">No hay cuotas para esta combinación.</p> : (
+          {celdaActiva.tipo === 'tarjeta' && (detalleCelda.length === 0 ? <p className="text-sm text-slate-600">No hay cuotas para esta combinación.</p> : (
             <DetalleCuotasLista cuotas={detalleCelda} nombresPersonas={nombresPersonas} nombresTarjetas={nombresTarjetas} />
-          )}
+          ))}
+          {celdaActiva.tipo === 'gasto_directo' && (detalleDirectoCelda.length === 0 ? <p className="text-sm text-slate-600">No hay gastos para esta combinación.</p> : <DetalleGastosDirectosLista gastos={detalleDirectoCelda} />)}
         </section>
       )}
     </section>
@@ -510,6 +646,19 @@ function DetalleCuotasLista({
       ))}
     </div>
   );
+}
+
+function DetalleGastosDirectosLista({ gastos }: { gastos: GastoDirecto[] }) {
+  return <div className="space-y-2">{gastos.map((gasto) => <article key={gasto.id} className="rounded-xl border p-3">
+    <div className="flex items-center justify-between gap-2">
+      <p className="font-medium">{gasto.establecimiento}</p>
+      <p className="font-semibold tabular-nums">{formatearMonto(gasto.monto, gasto.moneda)}</p>
+    </div>
+    <p className="text-sm text-slate-600">{gasto.fecha_gasto} · {gasto.categoria?.nombre ?? 'Sin categoría'} · {gasto.medio_pago?.nombre ?? 'Sin medio de pago'}</p>
+    <p className="text-sm text-slate-600">Persona: {gasto.persona ? `${gasto.persona.nombre} ${gasto.persona.apellido ?? ''}`.trim() : 'Sin persona'}</p>
+    {gasto.descripcion && <p className="text-sm text-slate-600">Descripción: {gasto.descripcion}</p>}
+    {gasto.observaciones && <p className="text-xs text-slate-500">Obs: {gasto.observaciones}</p>}
+  </article>)}</div>;
 }
 
 function CardTitulo({ titulo, valor, destacado = false }: { titulo: string; valor: string; destacado?: boolean }) {
