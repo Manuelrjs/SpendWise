@@ -34,7 +34,7 @@ type Categoria = { id: string; nombre: string };
 type MedioPago = { id: string; nombre: string };
 type Persona = { id: string; nombre: string; apellido: string | null };
 type CuentaTarjeta = { id: string; nombre_cuenta: string };
-type TarjetaFisica = { id: string; alias: string; numero_ultimos4: string | null };
+type TarjetaFisica = { id: string; alias: string | null; ultimos_4_digitos: string | null };
 
 type FilaResumen = {
   id: string;
@@ -146,7 +146,7 @@ export default function DashboardPage() {
       supabase.from('medios_pago').select('id,nombre'),
       supabase.from('personas').select('id,nombre,apellido'),
       supabase.from('cuentas_tarjeta').select('id,nombre_cuenta'),
-      supabase.from('tarjetas_fisicas').select('id,alias,numero_ultimos4'),
+      supabase.from('tarjetas_fisicas').select('id,alias,ultimos_4_digitos'),
     ]);
 
     if (
@@ -183,7 +183,7 @@ export default function DashboardPage() {
     setMediosPago(new Map(((mediosRes.data ?? []) as MedioPago[]).map((m) => [m.id, m.nombre])));
     setPersonas(new Map(((personasRes.data ?? []) as Persona[]).map((p) => [p.id, `${p.nombre} ${p.apellido ?? ''}`.trim()])));
     setCuentasTarjeta(new Map(((cuentasRes.data ?? []) as CuentaTarjeta[]).map((c) => [c.id, c.nombre_cuenta])));
-    setTarjetasFisicas(new Map(((tarjetasRes.data ?? []) as TarjetaFisica[]).map((t) => [t.id, `${t.alias}${t.numero_ultimos4 ? ` · ${t.numero_ultimos4}` : ''}`])));
+    setTarjetasFisicas(new Map(((tarjetasRes.data ?? []) as TarjetaFisica[]).map((t) => [t.id, `${t.alias ?? 'Tarjeta sin alias'}${t.ultimos_4_digitos ? ` · ${t.ultimos_4_digitos}` : ''}`])));
 
     setCargando(false);
   }
