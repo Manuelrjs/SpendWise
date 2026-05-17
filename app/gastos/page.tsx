@@ -2,6 +2,13 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import {
+  calcularPeriodoTarjeta,
+  CalendarioTarjeta,
+  construirFechaCierreEstimada,
+  construirFechaVencimientoEstimada,
+  formatearPeriodoDesdeFecha,
+} from '@/utils/tarjetas';
 
 type Gasto = {
   id: string;
@@ -23,7 +30,7 @@ type Gasto = {
 
 type OpcionBase = { id: string; nombre: string };
 type Persona = { id: string; nombre: string; apellido: string | null };
-type CuentaTarjeta = { id: string; nombre_cuenta: string };
+type CuentaTarjeta = { id: string; nombre_cuenta: string; dia_cierre_habitual: number | null; dias_hasta_vencimiento: number | null };
 type TarjetaFisica = {
   id: string;
   cuenta_tarjeta_id: string;
@@ -73,6 +80,7 @@ export default function Page() {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [cuentasTarjeta, setCuentasTarjeta] = useState<CuentaTarjeta[]>([]);
   const [tarjetasFisicas, setTarjetasFisicas] = useState<TarjetaFisica[]>([]);
+  const [calendarios, setCalendarios] = useState<CalendarioTarjeta[]>([]);
   const [filtros, setFiltros] = useState<Filtros>(FILTROS_INICIALES);
   const [gastoEditando, setGastoEditando] = useState<Gasto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,17 +142,41 @@ export default function Page() {
   }, [gastoEditando, tarjetasFisicas, tarjetasEtiquetas]);
 
   async function cargarDatos() {
-    const [g, c, m, p, ct, tf, cuotasRes] = await Promise.all([
+    const [g, c, m, p, ct, tf, cuotasRes, cal] = await Promise.all([
       supabase.from('gastos').select('id,fecha_gasto,establecimiento,descripcion,observaciones,categoria_id,monto,moneda,medio_pago_id,persona_id,cuenta_tarjeta_id,tarjeta_fisica_id,cantidad_cuotas,estado_registro,creado_en').order('fecha_gasto', { ascending: false }),
       supabase.from('categorias').select('id,nombre').order('nombre'),
-      supabase.from('medios_pago').select('id,nombre').order('nombre'),
+      supabase.from('medios_pago').select('id,nombre,tipo').order('nombre'),
       supabase.from('personas').select('id,nombre,apellido').order('nombre'),
-      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta').order('nombre_cuenta'),
+      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,dia_cierre_habitual,dias_hasta_vencimiento').order('nombre_cuenta'),
       supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,tipo,nombre_en_tarjeta,alias,ultimos_4_digitos,activo').order('id'),
-      supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,motivo_modificacion')
+      supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,motivo_modificacion'),
+      supabase.from('calendario_tarjetas').select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones')
     ]);
-    if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error) return setError('No se pudieron cargar los datos de gastos.');
-    setGastos((g.data ?? []) as Gasto[]); setCategorias((c.data ?? []) as OpcionBase[]); setMediosPago((m.data ?? []) as OpcionBase[]); setPersonas((p.data ?? []) as Persona[]); setCuentasTarjeta((ct.data ?? []) as CuentaTarjeta[]); setTarjetasFisicas((tf.data ?? []) as TarjetaFisica[]); setCuotas((cuotasRes.data ?? []) as CuotaTarjeta[]);
+    if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error || cal.error) return setError('No se pudieron cargar los datos de gastos.');
+    setGastos((g.data ?? []) as Gasto[]); setCategorias((c.data ?? []) as OpcionBase[]); setMediosPago((m.data ?? []) as OpcionBase[]); setPersonas((p.data ?? []) as Persona[]); setCuentasTarjeta((ct.data ?? []) as CuentaTarjeta[]); setTarjetasFisicas((tf.data ?? []) as TarjetaFisica[]); setCuotas((cuotasRes.data ?? []) as CuotaTarjeta[]); setCalendarios((cal.data ?? []) as CalendarioTarjeta[]);
+  }
+
+
+  async function asegurarCalendarioConversion(cuenta: CuentaTarjeta, periodo: string) {
+    const existente = calendarios.find((cal) => cal.cuenta_tarjeta_id === cuenta.id && cal.periodo_resumen === periodo);
+    if (existente) return existente;
+    if (!cuenta.dia_cierre_habitual || cuenta.dias_hasta_vencimiento === null) throw new Error('FALTA_CONFIG_CALENDARIO');
+    const fecha_cierre = construirFechaCierreEstimada(periodo, cuenta.dia_cierre_habitual);
+    const fecha_vencimiento = construirFechaVencimientoEstimada(fecha_cierre, cuenta.dias_hasta_vencimiento);
+    const payload = {
+      cuenta_tarjeta_id: cuenta.id,
+      periodo_resumen: periodo,
+      fecha_cierre,
+      fecha_vencimiento,
+      estado_calendario: 'estimado',
+      origen_fecha: 'calculado',
+      observaciones: 'Calendario generado automáticamente al convertir un gasto a tarjeta de crédito.',
+    };
+    const { data, error } = await supabase.from('calendario_tarjetas').insert(payload).select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones').single();
+    if (error || !data) throw error ?? new Error('No se pudo generar calendario estimado.');
+    const nuevo = data as CalendarioTarjeta;
+    setCalendarios((prev) => [...prev, nuevo]);
+    return nuevo;
   }
 
   async function guardarEdicion(event: FormEvent) {
@@ -160,6 +192,8 @@ export default function Page() {
     if (!originalTarjeta && nuevoTarjeta && gastoEditando.cantidad_cuotas > 1) return setError('Para convertir este gasto a tarjeta de crédito en cuotas, anulá este gasto y cargalo nuevamente desde Nuevo gasto.');
     if (tieneCuotas && original.cuenta_tarjeta_id !== gastoEditando.cuenta_tarjeta_id) return setError('Para cambiar la cuenta de tarjeta de un gasto con cuotas, anulá el gasto y cargalo nuevamente.');
     if (nuevoTarjeta && (!gastoEditando.cuenta_tarjeta_id || !gastoEditando.tarjeta_fisica_id)) return setError('Para un gasto con tarjeta de crédito, debés seleccionar cuenta de tarjeta y tarjeta física.');
+    if (!(gastoEditando.monto > 0)) return setError('El monto debe ser mayor a 0.');
+    if (!gastoEditando.fecha_gasto || !gastoEditando.persona_id || !gastoEditando.establecimiento.trim()) return setError('Completá fecha, persona y establecimiento para continuar.');
     if (nuevoTarjeta && gastoEditando.tarjeta_fisica_id) {
       const tarjetaValida = tarjetasFisicas.some((t) => t.id === gastoEditando.tarjeta_fisica_id && t.cuenta_tarjeta_id === gastoEditando.cuenta_tarjeta_id);
       if (!tarjetaValida) return setError('La tarjeta física seleccionada no pertenece a la cuenta elegida.');
@@ -169,33 +203,62 @@ export default function Page() {
       establecimiento: gastoEditando.establecimiento.trim(), categoria_id: gastoEditando.categoria_id, persona_id: gastoEditando.persona_id, descripcion: gastoEditando.descripcion, observaciones: gastoEditando.observaciones,
       ...(tieneCuotas ? { tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id } : { fecha_gasto: gastoEditando.fecha_gasto, monto: gastoEditando.monto, medio_pago_id: gastoEditando.medio_pago_id, cuenta_tarjeta_id: nuevoTarjeta ? gastoEditando.cuenta_tarjeta_id : null, tarjeta_fisica_id: nuevoTarjeta ? gastoEditando.tarjeta_fisica_id : null, cantidad_cuotas: nuevoTarjeta ? 1 : 1 }),
     };
-    const { error: e } = await supabase.from('gastos').update(payload).eq('id', gastoEditando.id);
-    if (e) return setError('No se pudo guardar la edición.');
-    if (!tieneCuotas && !originalTarjeta && nuevoTarjeta) {
-      const periodo = gastoEditando.fecha_gasto.slice(0, 7);
-      const { error: cuotaError } = await supabase.from('cuotas_tarjeta').insert({
-        gasto_id: gastoEditando.id,
-        cuenta_tarjeta_id: gastoEditando.cuenta_tarjeta_id,
-        tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id,
-        persona_id: gastoEditando.persona_id,
-        establecimiento: gastoEditando.establecimiento,
-        descripcion_cuota: gastoEditando.descripcion?.trim() || gastoEditando.establecimiento,
-        numero_cuota: 1,
-        total_cuotas: 1,
-        monto_cuota: gastoEditando.monto,
-        moneda: gastoEditando.moneda,
-        periodo_pago_estimado: periodo,
-        estado: 'pendiente',
-        origen_cuota: 'gasto',
-        observaciones: gastoEditando.observaciones?.trim() || null,
-      });
-      if (cuotaError) return setError('No se pudo generar la cuota 1/1 para el gasto convertido a tarjeta de crédito.');
+    try {
+      const { error: e } = await supabase.from('gastos').update(payload).eq('id', gastoEditando.id);
+      if (e) throw e;
+      if (!tieneCuotas && !originalTarjeta && nuevoTarjeta) {
+        const cuenta = cuentasTarjeta.find((c) => c.id === gastoEditando.cuenta_tarjeta_id);
+        if (!cuenta) throw new Error('CUENTA_INVALIDA');
+        const periodoBase = formatearPeriodoDesdeFecha(gastoEditando.fecha_gasto);
+        const calendarioBase = await asegurarCalendarioConversion(cuenta, periodoBase);
+        const resultadoPeriodo = calcularPeriodoTarjeta({ fecha_gasto: gastoEditando.fecha_gasto, cuenta_tarjeta_id: cuenta.id, calendarios: [...calendarios, calendarioBase] });
+        const calendarioPago = await asegurarCalendarioConversion(cuenta, resultadoPeriodo.periodo_resumen);
+        const { error: cuotaError } = await supabase.from('cuotas_tarjeta').insert({
+          gasto_id: gastoEditando.id,
+          compra_cuota_inicial_id: null,
+          cuenta_tarjeta_id: gastoEditando.cuenta_tarjeta_id,
+          tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id,
+          persona_id: gastoEditando.persona_id,
+          establecimiento: gastoEditando.establecimiento.trim(),
+          descripcion_cuota: gastoEditando.descripcion?.trim() || gastoEditando.establecimiento.trim(),
+          numero_cuota: 1,
+          total_cuotas: 1,
+          monto_cuota: gastoEditando.monto,
+          moneda: gastoEditando.moneda,
+          periodo_pago_estimado: resultadoPeriodo.periodo_pago,
+          fecha_estimada_pago: calendarioPago.fecha_vencimiento,
+          estado: 'pendiente',
+          origen_cuota: 'gasto_nuevo',
+          observaciones: gastoEditando.observaciones?.trim() || null,
+        });
+        if (cuotaError) throw cuotaError;
+        setMensajeExito('Gasto convertido a tarjeta de crédito y cuota 1/1 generada correctamente.');
+      }
+    } catch (error) {
+      console.error(error);
+      if (!tieneCuotas && !originalTarjeta && nuevoTarjeta) {
+        await supabase.from('gastos').update({
+          fecha_gasto: original.fecha_gasto,
+          monto: original.monto,
+          medio_pago_id: original.medio_pago_id,
+          cuenta_tarjeta_id: original.cuenta_tarjeta_id,
+          tarjeta_fisica_id: original.tarjeta_fisica_id,
+          cantidad_cuotas: original.cantidad_cuotas,
+          establecimiento: original.establecimiento,
+          categoria_id: original.categoria_id,
+          persona_id: original.persona_id,
+          descripcion: original.descripcion,
+          observaciones: original.observaciones,
+        }).eq('id', gastoEditando.id);
+        return setError('No se pudo convertir el gasto a tarjeta de crédito. Revisá la cuenta, tarjeta y calendario.');
+      }
+      return setError('No se pudo guardar la edición.');
     }
     if (tieneCuotas) {
       if (original.persona_id !== gastoEditando.persona_id) await supabase.from('cuotas_tarjeta').update({ persona_id: gastoEditando.persona_id }).eq('gasto_id', gastoEditando.id).not('estado', 'in', '("pagada","cancelada")');
       if (original.tarjeta_fisica_id !== gastoEditando.tarjeta_fisica_id) await supabase.from('cuotas_tarjeta').update({ tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id }).eq('gasto_id', gastoEditando.id).not('estado', 'in', '("pagada","cancelada")');
     }
-    setMensajeExito('Gasto actualizado correctamente.'); setGastoEditando(null); await cargarDatos();
+    if (!(!tieneCuotas && !originalTarjeta && nuevoTarjeta)) setMensajeExito('Gasto actualizado correctamente.'); setGastoEditando(null); await cargarDatos();
   }
 
   async function actualizarCuotaAsociada(cuota: CuotaTarjeta, cambios: { periodo_pago_estimado: string; observaciones: string | null }) {
@@ -258,6 +321,7 @@ export default function Page() {
       }), gastoEditandoTieneCuotas)}
       {gastoEditandoEsTarjeta ? (
         <>
+          {!gastoEditandoTieneCuotas ? <p className="text-xs text-slate-600">Se registrará como tarjeta de crédito en 1 pago y se generará una cuota 1/1 para el flujo mensual.</p> : null}
           {renderSelect('Cuenta de tarjeta', gastoEditando.cuenta_tarjeta_id ?? '', cuentasTarjeta.map((c) => ({ id: c.id, nombre: c.nombre_cuenta })), (v) => setGastoEditando((p) => p ? { ...p, cuenta_tarjeta_id: v || null, tarjeta_fisica_id: null } : null), gastoEditandoTieneCuotas)}
           {renderSelect('Tarjeta física', gastoEditando.tarjeta_fisica_id ?? '', tarjetasDisponiblesEdicion, (v) => setGastoEditando((p) => p ? { ...p, tarjeta_fisica_id: v || null } : null), gastoEditandoTieneCuotas)}
         </>
