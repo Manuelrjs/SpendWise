@@ -27,7 +27,8 @@ type CuentaTarjeta = { id: string; nombre_cuenta: string };
 type TarjetaFisica = { id: string; alias: string | null; ultimos_4_digitos: string | null; tipo: string };
 type CuotaTarjeta = {
   id: string;
-  gasto_id: string;
+  gasto_id: string | null;
+  compra_cuota_inicial_id: string | null;
   numero_cuota: number;
   total_cuotas: number;
   periodo_pago_estimado: string;
@@ -58,6 +59,10 @@ type EdicionCuota = { id: string; periodo_pago_estimado: string; observaciones: 
 const ESTADOS_EDITABLES_CUOTA = new Set(['pendiente', 'proyectada', 'no_incluida', 'reprogramada']);
 const ESTADOS_NO_EDITABLES_CUOTA = new Set(['pagada', 'cancelada']);
 
+function obtenerClaveCuota(cuota: Pick<CuotaTarjeta, 'gasto_id' | 'compra_cuota_inicial_id'>) {
+  return cuota.gasto_id ?? cuota.compra_cuota_inicial_id ?? '';
+}
+
 const FILTROS_INICIALES: Filtros = {
   busqueda: '', fecha_desde: '', fecha_hasta: '', categoria_id: '', persona_id: '', medio_pago_id: '', cuenta_tarjeta_id: '', tarjeta_fisica_id: '', estado_registro: '',
 };
@@ -86,7 +91,11 @@ export default function Page() {
   const nombresPersona = useMemo(() => new Map(personas.map((p) => [p.id, `${p.nombre} ${p.apellido ?? ''}`.trim()])), [personas]);
   const nombresCuenta = useMemo(() => new Map(cuentasTarjeta.map((c) => [c.id, c.nombre_cuenta])), [cuentasTarjeta]);
   const nombresTarjeta = useMemo(() => new Map(tarjetasFisicas.map((t) => [t.id, `${t.alias ?? t.tipo}${t.ultimos_4_digitos ? ` • ${t.ultimos_4_digitos}` : ''}`])), [tarjetasFisicas]);
-  const cuotasPorGasto = useMemo(() => cuotas.reduce((acc, cuota) => acc.set(cuota.gasto_id, (acc.get(cuota.gasto_id) ?? 0) + 1), new Map<string, number>()), [cuotas]);
+  const cuotasPorGasto = useMemo(() => cuotas.reduce((acc, cuota) => {
+    if (!cuota.gasto_id) return acc;
+    acc.set(cuota.gasto_id, (acc.get(cuota.gasto_id) ?? 0) + 1);
+    return acc;
+  }, new Map<string, number>()), [cuotas]);
   const cuotasGastoEditando = useMemo(() => (gastoEditando ? cuotas.filter((c) => c.gasto_id === gastoEditando.id) : []), [cuotas, gastoEditando]);
 
   const gastosFiltrados = useMemo(() => gastos.filter((gasto) => {
@@ -113,7 +122,7 @@ export default function Page() {
       supabase.from('personas').select('id,nombre,apellido').order('nombre'),
       supabase.from('cuentas_tarjeta').select('id,nombre_cuenta').order('nombre_cuenta'),
       supabase.from('tarjetas_fisicas').select('id,alias,ultimos_4_digitos,tipo').order('alias'),
-      supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,creado_en')
+      supabase.from('cuotas_tarjeta').select('id,gasto_id,compra_cuota_inicial_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,creado_en')
     ]);
     if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error) {
       console.error(g.error ?? c.error ?? m.error ?? p.error ?? ct.error ?? tf.error ?? cuotasRes.error);
@@ -122,9 +131,13 @@ export default function Page() {
       return;
     }
     const cuotasOrdenadas = [ ...((cuotasRes.data ?? []) as CuotaTarjeta[]) ]
-      .sort((a, b) => (a.gasto_id === b.gasto_id
+      .sort((a, b) => {
+        const claveA = obtenerClaveCuota(a);
+        const claveB = obtenerClaveCuota(b);
+        return claveA === claveB
         ? a.numero_cuota - b.numero_cuota
-        : a.gasto_id.localeCompare(b.gasto_id)));
+        : claveA.localeCompare(claveB);
+      });
 
     setGastos((g.data ?? []) as Gasto[]); setCategorias((c.data ?? []) as OpcionBase[]); setMediosPago((m.data ?? []) as OpcionBase[]); setPersonas((p.data ?? []) as Persona[]); setCuentasTarjeta((ct.data ?? []) as CuentaTarjeta[]); setTarjetasFisicas((tf.data ?? []) as TarjetaFisica[]); setCuotas(cuotasOrdenadas); setCargando(false);
   }
