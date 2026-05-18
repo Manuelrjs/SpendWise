@@ -104,13 +104,27 @@ function extraerDetalleError(error: unknown): {
   };
 }
 
+function construirRespuestaError(detalle: ReturnType<typeof extraerDetalleError>) {
+  return {
+    error: MENSAJE_ERROR_ANALISIS,
+    detalle: detalle.mensaje,
+    name: detalle.name,
+    status: detalle.status,
+    code: detalle.code,
+    type: detalle.type,
+    stack: detalle.stack,
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const archivo = formData.get('archivo');
 
     if (!(archivo instanceof File)) {
-      return NextResponse.json({ mensaje: 'No se recibió ningún archivo para analizar.' }, { status: 400 });
+      const detalle = extraerDetalleError('No se recibió ningún archivo para analizar.');
+      console.error('Error analizando comprobante:', detalle);
+      return NextResponse.json(construirRespuestaError(detalle), { status: 400 });
     }
 
     if (archivo.type === 'application/pdf') {
@@ -124,21 +138,21 @@ export async function POST(request: Request) {
     }
 
     if (!TIPOS_IMAGEN.includes(archivo.type)) {
-      return NextResponse.json({ mensaje: 'Formato no soportado para análisis automático.' }, { status: 400 });
+      const detalle = extraerDetalleError('Formato no soportado para análisis automático.');
+      console.error('Error analizando comprobante:', detalle);
+      return NextResponse.json(construirRespuestaError(detalle), { status: 400 });
     }
 
     if (archivo.size > TAMANO_MAXIMO_COMPROBANTE_BYTES) {
-      return NextResponse.json({ mensaje: 'El archivo supera el tamaño máximo permitido.' }, { status: 400 });
+      const detalle = extraerDetalleError('El archivo supera el tamaño máximo permitido.');
+      console.error('Error analizando comprobante:', detalle);
+      return NextResponse.json(construirRespuestaError(detalle), { status: 400 });
     }
 
     if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        {
-          error: 'La extracción automática aún no está configurada.',
-          detalle: 'Falta OPENAI_API_KEY',
-        },
-        { status: 500 },
-      );
+      const detalle = extraerDetalleError('Falta OPENAI_API_KEY');
+      console.error('Error analizando comprobante:', detalle);
+      return NextResponse.json(construirRespuestaError(detalle), { status: 500 });
     }
 
     const bytes = await archivo.arrayBuffer();
@@ -201,7 +215,9 @@ Reglas:
     const contenido = data.output_text;
 
     if (!contenido) {
-      return NextResponse.json({ error: MENSAJE_ERROR_ANALISIS }, { status: 502 });
+      const detalle = extraerDetalleError('OpenAI no devolvió output_text en la respuesta.');
+      console.error('Error analizando comprobante:', detalle);
+      return NextResponse.json(construirRespuestaError(detalle), { status: 502 });
     }
 
     const contenidoLimpio = limpiarJsonDeMarkdown(contenido);
@@ -209,15 +225,16 @@ Reglas:
     let parsed: unknown;
     try {
       parsed = JSON.parse(contenidoLimpio) as unknown;
-    } catch {
-      return NextResponse.json(
-        {
-          error: MENSAJE_ERROR_ANALISIS,
-          detalle: 'No se pudo interpretar la respuesta de IA.',
-          ...(process.env.NODE_ENV !== 'production' ? { respuesta_cruda: contenido } : {}),
-        },
-        { status: 502 },
-      );
+    } catch (error) {
+      const detalle = extraerDetalleError(error);
+      if (detalle.mensaje === 'Error desconocido') {
+        detalle.mensaje = 'No se pudo interpretar la respuesta de IA.';
+      }
+      console.error('Error analizando comprobante:', {
+        ...detalle,
+        respuesta_cruda: contenido,
+      });
+      return NextResponse.json(construirRespuestaError(detalle), { status: 502 });
     }
 
     return NextResponse.json({ sugerencias: limpiarRespuesta(parsed) });
@@ -235,16 +252,7 @@ Reglas:
     });
 
     return NextResponse.json(
-      {
-        error: MENSAJE_ERROR_ANALISIS,
-        ...(process.env.NODE_ENV !== 'production'
-          ? {
-              detalle: detalle.mensaje,
-              code: detalle.code,
-              status: detalle.status,
-            }
-          : {}),
-      },
+      construirRespuestaError(detalle),
       { status: 502 },
     );
   }
