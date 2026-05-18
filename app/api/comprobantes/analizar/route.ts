@@ -71,6 +71,64 @@ function limpiarJsonDeMarkdown(texto: string): string {
     .trim();
 }
 
+type RespuestaOpenAI = {
+  output_text?: string;
+  output?: Array<{
+    type?: string;
+    content?: Array<{
+      type?: string;
+      text?: string;
+    }>;
+  }>;
+};
+
+function resumirRespuestaOpenAI(response: RespuestaOpenAI): Record<string, unknown> {
+  return {
+    output_text: response.output_text ? `${response.output_text.slice(0, 300)}${response.output_text.length > 300 ? '…' : ''}` : null,
+    output: Array.isArray(response.output)
+      ? response.output.slice(0, 3).map((item) => ({
+        type: item?.type ?? null,
+        content: Array.isArray(item?.content)
+          ? item.content.slice(0, 5).map((contentItem) => ({
+            type: contentItem?.type ?? null,
+            text_preview: typeof contentItem?.text === 'string'
+              ? `${contentItem.text.slice(0, 200)}${contentItem.text.length > 200 ? '…' : ''}`
+              : null,
+          }))
+          : null,
+      }))
+      : null,
+  };
+}
+
+function extraerTextoOpenAI(response: RespuestaOpenAI): string | null {
+  if (typeof response.output_text === 'string' && response.output_text.trim()) {
+    return response.output_text;
+  }
+
+  if (!Array.isArray(response.output)) {
+    return null;
+  }
+
+  for (const item of response.output) {
+    if (!Array.isArray(item?.content)) {
+      continue;
+    }
+
+    for (const contentItem of item.content) {
+      if (typeof contentItem?.text !== 'string' || !contentItem.text.trim()) {
+        continue;
+      }
+
+      if (!contentItem.type || contentItem.type === 'output_text' || contentItem.type === 'text') {
+        return contentItem.text;
+      }
+    }
+  }
+
+  return null;
+}
+
 function extraerDetalleError(error: unknown): {
   mensaje: string;
   status?: number;
@@ -211,11 +269,21 @@ Reglas:
       });
     }
 
-    const data = (await respuestaOpenAI.json()) as { output_text?: string };
-    const contenido = data.output_text;
+    const data = (await respuestaOpenAI.json()) as RespuestaOpenAI;
+    const contenido = extraerTextoOpenAI(data);
 
     if (!contenido) {
-      const detalle = extraerDetalleError('OpenAI no devolvió output_text en la respuesta.');
+      const resumenRespuesta = resumirRespuestaOpenAI(data);
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('No se encontró texto interpretable en la respuesta de OpenAI:', resumenRespuesta);
+        return NextResponse.json({
+          error: MENSAJE_ERROR_ANALISIS,
+          detalle: 'OpenAI no devolvió texto interpretable.',
+          respuesta_openai_resumida: resumenRespuesta,
+        }, { status: 502 });
+      }
+
+      const detalle = extraerDetalleError('OpenAI no devolvió texto interpretable.');
       console.error('Error analizando comprobante:', detalle);
       return NextResponse.json(construirRespuestaError(detalle), { status: 502 });
     }
@@ -227,14 +295,16 @@ Reglas:
       parsed = JSON.parse(contenidoLimpio) as unknown;
     } catch (error) {
       const detalle = extraerDetalleError(error);
-      if (detalle.mensaje === 'Error desconocido') {
-        detalle.mensaje = 'No se pudo interpretar la respuesta de IA.';
-      }
+      const mensaje = 'No se pudo interpretar la respuesta de IA.';
       console.error('Error analizando comprobante:', {
         ...detalle,
         respuesta_cruda: contenido,
       });
-      return NextResponse.json(construirRespuestaError(detalle), { status: 502 });
+      return NextResponse.json({
+        error: mensaje,
+        detalle: detalle.mensaje,
+        texto_recibido: contenido,
+      }, { status: 502 });
     }
 
     return NextResponse.json({ sugerencias: limpiarRespuesta(parsed) });
