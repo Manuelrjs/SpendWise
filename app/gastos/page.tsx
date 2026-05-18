@@ -58,7 +58,18 @@ type CuotaTarjeta = {
   motivo_modificacion?: string | null;
 };
 
-type Comprobante = { id: string; gasto_id: string; nombre_archivo: string | null; tipo_archivo: string; ruta_storage: string | null; url_storage: string | null; creado_en: string; };
+type Comprobante = {
+  id: string;
+  gasto_id: string;
+  nombre_archivo: string | null;
+  tipo_archivo: string;
+  ruta_storage: string | null;
+  url_storage: string | null;
+  proveedor_almacenamiento: string | null;
+  url_drive: string | null;
+  estado_archivo: string | null;
+  creado_en: string;
+};
 
 type Filtros = {
   busqueda: string;
@@ -108,6 +119,9 @@ export default function Page() {
   const [comprobanteNuevo, setComprobanteNuevo] = useState<File | null>(null);
   const [mensajeComprobante, setMensajeComprobante] = useState<string | null>(null);
   const [arrastrandoComprobante, setArrastrandoComprobante] = useState(false);
+  const [comprobantePreviewAbierto, setComprobantePreviewAbierto] = useState(false);
+  const [gastoPreviewId, setGastoPreviewId] = useState<string | null>(null);
+  const [indicePreview, setIndicePreview] = useState(0);
   const inputSubirRef = useRef<HTMLInputElement | null>(null);
   const inputCamaraRef = useRef<HTMLInputElement | null>(null);
 
@@ -182,7 +196,7 @@ export default function Page() {
       supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,tipo,nombre_en_tarjeta,alias,ultimos_4_digitos,activo').order('id'),
       supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,motivo_modificacion'),
       supabase.from('calendario_tarjetas').select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones'),
-      supabase.from('comprobantes').select('id,gasto_id,nombre_archivo,tipo_archivo,ruta_storage,url_storage,creado_en').order('creado_en', { ascending: false })
+      supabase.from('comprobantes').select('id,gasto_id,nombre_archivo,tipo_archivo,ruta_storage,url_storage,proveedor_almacenamiento,url_drive,estado_archivo,creado_en').eq('estado_archivo', 'activo').order('creado_en', { ascending: false })
     ]);
     if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error || cal.error || comp.error) return setError('No se pudieron cargar los datos de gastos.');
     setGastos((g.data ?? []) as Gasto[]); setCategorias((c.data ?? []) as OpcionBase[]); setMediosPago((m.data ?? []) as OpcionBase[]); setPersonas((p.data ?? []) as Persona[]); setCuentasTarjeta((ct.data ?? []) as CuentaTarjeta[]); setTarjetasFisicas((tf.data ?? []) as TarjetaFisica[]); setCuotas((cuotasRes.data ?? []) as CuotaTarjeta[]); setCalendarios((cal.data ?? []) as CalendarioTarjeta[]); setComprobantes((comp.data ?? []) as Comprobante[]);
@@ -383,6 +397,24 @@ export default function Page() {
     await cargarDatos();
   }
 
+  function obtenerUrlComprobante(comprobante: Comprobante) {
+    if (comprobante.proveedor_almacenamiento === 'google_drive' && comprobante.url_drive) return comprobante.url_drive;
+    if (comprobante.url_storage) return comprobante.url_storage;
+    return null;
+  }
+
+  function esImagen(tipoArchivo: string) {
+    return ['image/jpg', 'image/jpeg', 'image/png', 'image/webp'].includes(tipoArchivo.toLowerCase());
+  }
+
+  function esPdf(tipoArchivo: string) {
+    return tipoArchivo.toLowerCase() === 'application/pdf';
+  }
+
+  const comprobantesGastoPreview = useMemo(() => gastoPreviewId ? comprobantes.filter((c) => c.gasto_id === gastoPreviewId) : [], [comprobantes, gastoPreviewId]);
+  const comprobantePreview = comprobantesGastoPreview[indicePreview] ?? null;
+  const urlComprobantePreview = comprobantePreview ? obtenerUrlComprobante(comprobantePreview) : null;
+
   return <section className="space-y-4">
     <h1 className="text-2xl font-semibold">Historial de gastos {filtros.estado_registro === 'anulados' ? <span className="ml-2 rounded-full bg-rose-100 px-2 py-1 text-xs text-rose-700">Vista Anulados</span> : null}</h1>
     {mensajeExito && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{mensajeExito}</p>}
@@ -406,7 +438,28 @@ export default function Page() {
       <div className="rounded-xl border bg-white p-3 text-sm">Total anulado: <strong>${totalAnulado.toFixed(2)}</strong></div>
     </div>
 
-    <div className="overflow-x-auto rounded-2xl border bg-white"><table className="min-w-full text-sm"><tbody>{gastosFiltrados.map((gasto) => <tr key={gasto.id} className={`border-t ${gasto.estado_registro === 'anulado' ? 'text-slate-400' : ''}`}><td className="px-2 py-2">{gasto.fecha_gasto}</td><td className="px-2">{gasto.establecimiento}</td><td className="px-2">{nombresCategoria.get(gasto.categoria_id)}</td><td className="px-2">{nombresPersona.get(gasto.persona_id)}</td><td className="px-2">{nombresMedioPago.get(gasto.medio_pago_id)}</td><td className="px-2">{cuotasPorGasto.get(gasto.id) ?? gasto.cantidad_cuotas}</td><td className="px-2">{(comprobantesPorGasto.get(gasto.id) ?? 0) > 0 ? <span className="rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700">Con comprobante</span> : <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">Sin comprobante</span>}</td><td className="px-2">{gasto.estado_registro === 'anulado' ? <span className="rounded bg-rose-100 px-2 py-1 text-xs text-rose-700">Anulado</span> : null}</td><td className="px-2"><button onClick={() => setGastoEditando(gasto)} className="rounded border px-2 py-1">Editar</button>{gasto.estado_registro !== 'anulado' ? <button onClick={() => void anularGasto(gasto)} className="ml-2 rounded border border-rose-200 px-2 py-1 text-rose-700">Anular</button> : null}</td></tr>)}</tbody></table></div>
+    <div className="overflow-x-auto rounded-2xl border bg-white"><table className="min-w-full text-sm"><tbody>{gastosFiltrados.map((gasto) => <tr key={gasto.id} className={`border-t ${gasto.estado_registro === 'anulado' ? 'text-slate-400' : ''}`}><td className="px-2 py-2">{gasto.fecha_gasto}</td><td className="px-2">{gasto.establecimiento}</td><td className="px-2">{nombresCategoria.get(gasto.categoria_id)}</td><td className="px-2">{nombresPersona.get(gasto.persona_id)}</td><td className="px-2">{nombresMedioPago.get(gasto.medio_pago_id)}</td><td className="px-2">{cuotasPorGasto.get(gasto.id) ?? gasto.cantidad_cuotas}</td><td className="px-2">{(comprobantesPorGasto.get(gasto.id) ?? 0) > 0 ? <button type="button" onClick={() => { setGastoPreviewId(gasto.id); setIndicePreview(0); setComprobantePreviewAbierto(true); }} className="cursor-pointer rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700 transition hover:bg-emerald-200">Con comprobante</button> : <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">Sin comprobante</span>}</td><td className="px-2">{gasto.estado_registro === 'anulado' ? <span className="rounded bg-rose-100 px-2 py-1 text-xs text-rose-700">Anulado</span> : null}</td><td className="px-2"><button onClick={() => setGastoEditando(gasto)} className="rounded border px-2 py-1">Editar</button>{gasto.estado_registro !== 'anulado' ? <button onClick={() => void anularGasto(gasto)} className="ml-2 rounded border border-rose-200 px-2 py-1 text-rose-700">Anular</button> : null}</td></tr>)}</tbody></table></div>
+
+    {comprobantePreviewAbierto ? <div className="fixed inset-0 z-50 flex items-end bg-slate-900/60 p-0 sm:items-center sm:justify-center sm:p-4">
+      <div className="w-full rounded-t-2xl bg-white p-4 sm:max-w-3xl sm:rounded-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Comprobante</h3>
+          <button type="button" onClick={() => setComprobantePreviewAbierto(false)} className="rounded-xl border px-3 py-1.5 text-sm">Cerrar</button>
+        </div>
+        {comprobantePreview ? <div className="space-y-3">
+          <p className="truncate text-sm text-slate-700">{comprobantePreview.nombre_archivo ?? 'Archivo sin nombre'}</p>
+          {comprobantesGastoPreview.length > 1 ? <div className="flex flex-wrap gap-2">{comprobantesGastoPreview.map((item, index) => <button type="button" key={item.id} onClick={() => setIndicePreview(index)} className={`rounded-lg px-2 py-1 text-xs ${index === indicePreview ? 'bg-emerald-600 text-white' : 'border bg-slate-50 text-slate-700'}`}>#{index + 1}</button>)}</div> : null}
+          <div className="max-h-[60vh] overflow-auto rounded-xl border bg-slate-50 p-2">
+            {urlComprobantePreview ? (
+              esImagen(comprobantePreview.tipo_archivo) ? <img src={urlComprobantePreview} alt={comprobantePreview.nombre_archivo ?? 'Comprobante'} className="mx-auto h-auto max-h-[55vh] w-auto rounded-lg object-contain" /> : (
+                esPdf(comprobantePreview.tipo_archivo) ? <iframe title={comprobantePreview.nombre_archivo ?? 'Comprobante PDF'} src={urlComprobantePreview} className="h-[55vh] w-full rounded-lg" /> : <p className="p-4 text-sm text-slate-600">Formato no compatible para vista previa.</p>
+              )
+            ) : <p className="p-4 text-sm text-rose-700">No se pudo abrir el comprobante.</p>}
+          </div>
+          {urlComprobantePreview ? <a href={urlComprobantePreview} target="_blank" rel="noreferrer" className="inline-flex rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white">Abrir en nueva pestaña</a> : null}
+        </div> : <p className="text-sm text-slate-600">No hay comprobantes activos para este gasto.</p>}
+      </div>
+    </div> : null}
 
     {gastoEditando && <form onSubmit={guardarEdicion} className="space-y-2 rounded-2xl border bg-white p-4">
       <h2 className="font-semibold">Editar gasto</h2>
