@@ -71,12 +71,29 @@ function limpiarJsonDeMarkdown(texto: string): string {
     .trim();
 }
 
-function extraerDetalleError(error: unknown): { mensaje: string; status?: number; data?: unknown; stack?: string } {
+function extraerDetalleError(error: unknown): {
+  mensaje: string;
+  status?: number;
+  code?: string;
+  type?: string;
+  data?: unknown;
+  stack?: string;
+  name?: string;
+} {
   if (error instanceof Error) {
-    const e = error as Error & { status?: number; response?: { data?: unknown } };
+    const e = error as Error & {
+      status?: number;
+      code?: string;
+      type?: string;
+      response?: { data?: unknown };
+    };
+
     return {
       mensaje: e.message,
+      name: e.name,
       status: e.status,
+      code: e.code,
+      type: e.type,
       data: e.response?.data,
       stack: e.stack,
     };
@@ -116,7 +133,10 @@ export async function POST(request: Request) {
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
-        { error: 'La extracción automática aún no está configurada.' },
+        {
+          error: 'La extracción automática aún no está configurada.',
+          detalle: 'Falta OPENAI_API_KEY',
+        },
         { status: 500 },
       );
     }
@@ -191,7 +211,11 @@ Reglas:
       parsed = JSON.parse(contenidoLimpio) as unknown;
     } catch {
       return NextResponse.json(
-        { error: MENSAJE_ERROR_ANALISIS, detalle: 'No se pudo interpretar la respuesta de IA.' },
+        {
+          error: MENSAJE_ERROR_ANALISIS,
+          detalle: 'No se pudo interpretar la respuesta de IA.',
+          ...(process.env.NODE_ENV !== 'production' ? { respuesta_cruda: contenido } : {}),
+        },
         { status: 502 },
       );
     }
@@ -199,17 +223,27 @@ Reglas:
     return NextResponse.json({ sugerencias: limpiarRespuesta(parsed) });
   } catch (error) {
     const detalle = extraerDetalleError(error);
-    console.error('Error en /api/comprobantes/analizar', {
-      mensaje: detalle.mensaje,
+    console.error('Error analizando comprobante:', {
+      message: detalle.mensaje,
+      name: detalle.name,
       status: detalle.status,
-      data: detalle.data,
+      code: detalle.code,
+      type: detalle.type,
       stack: detalle.stack,
+      data: detalle.data,
+      raw: error,
     });
 
     return NextResponse.json(
       {
         error: MENSAJE_ERROR_ANALISIS,
-        ...(process.env.NODE_ENV === 'development' ? { detalle: detalle.mensaje } : {}),
+        ...(process.env.NODE_ENV !== 'production'
+          ? {
+              detalle: detalle.mensaje,
+              code: detalle.code,
+              status: detalle.status,
+            }
+          : {}),
       },
       { status: 502 },
     );
