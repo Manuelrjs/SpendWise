@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { MENSAJE_ERROR_BUCKET_COMPROBANTES, normalizarNombreArchivo, validarComprobante } from '@/lib/comprobantes';
 import {
@@ -26,6 +26,22 @@ type Formulario = {
 const HOY = new Date().toISOString().slice(0, 10);
 const inicial: Formulario = { monto: '', moneda: 'ARS', medio_pago_id: '', cuenta_tarjeta_id: '', tarjeta_fisica_id: '', fecha_gasto: HOY, establecimiento: '', categoria_id: '', persona_id: '', cantidad_cuotas: 1, descripcion: '', observaciones: '' };
 
+
+function formatearTamanoArchivo(tamano: number) {
+  if (tamano < 1024 * 1024) return `${(tamano / 1024).toFixed(1)} KB`;
+  return `${(tamano / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function crearNombreComprobantePegado() {
+  const fecha = new Date();
+  const yyyy = fecha.getFullYear();
+  const mm = String(fecha.getMonth() + 1).padStart(2, '0');
+  const dd = String(fecha.getDate()).padStart(2, '0');
+  const hh = String(fecha.getHours()).padStart(2, '0');
+  const min = String(fecha.getMinutes()).padStart(2, '0');
+  return `comprobante-pegado-${yyyy}-${mm}-${dd}-${hh}${min}.png`;
+}
+
 export default function Page() {
   const [formulario, setFormulario] = useState<Formulario>(inicial);
   const [medios, setMedios] = useState<MedioPago[]>([]);
@@ -40,6 +56,10 @@ export default function Page() {
   const [guardando, setGuardando] = useState(false);
   const [mostrarAvanzado, setMostrarAvanzado] = useState(false);
   const [comprobante, setComprobante] = useState<File | null>(null);
+  const [mensajeComprobante, setMensajeComprobante] = useState<string | null>(null);
+  const [arrastrandoComprobante, setArrastrandoComprobante] = useState(false);
+  const inputSubirRef = useRef<HTMLInputElement | null>(null);
+  const inputCamaraRef = useRef<HTMLInputElement | null>(null);
 
   const medioSeleccionado = useMemo(() => medios.find((medio) => medio.id === formulario.medio_pago_id), [medios, formulario.medio_pago_id]);
   const esTarjetaCredito = medioSeleccionado?.tipo === 'tarjeta_credito';
@@ -77,6 +97,37 @@ export default function Page() {
     const nuevo = data as CalendarioTarjeta;
     setCalendarios((prev) => [...prev, nuevo]);
     return { calendario: nuevo, generado: true };
+  }
+
+
+  function seleccionarComprobante(archivo: File | null) {
+    if (!archivo) return;
+    const validacion = validarComprobante(archivo);
+    if (!validacion.valido) return setError(validacion.mensaje);
+    setComprobante(archivo);
+    setMensajeComprobante(null);
+    setError(null);
+  }
+
+  function manejarCambioArchivo(event: ChangeEvent<HTMLInputElement>) {
+    seleccionarComprobante(event.target.files?.[0] ?? null);
+    event.currentTarget.value = '';
+  }
+
+  function manejarPegadoComprobante(event: ClipboardEvent<HTMLDivElement>) {
+    const item = Array.from(event.clipboardData.items).find((clipboardItem) => clipboardItem.type.startsWith('image/'));
+    if (!item) return setMensajeComprobante('No se detectó una imagen en el portapapeles.');
+    event.preventDefault();
+    const blob = item.getAsFile();
+    if (!blob) return setMensajeComprobante('No se detectó una imagen en el portapapeles.');
+    const archivoPegado = new File([blob], crearNombreComprobantePegado(), { type: 'image/png' });
+    seleccionarComprobante(archivoPegado);
+  }
+
+  function manejarDropComprobante(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setArrastrandoComprobante(false);
+    seleccionarComprobante(event.dataTransfer.files?.[0] ?? null);
   }
 
   async function guardar(event: FormEvent) {
@@ -187,7 +238,7 @@ export default function Page() {
 {esTarjetaCredito && <><div><p className="mb-2 text-sm font-medium">Cuenta de tarjeta *</p><div className="space-y-2">{cuentas.map((cuenta) => <button key={cuenta.id} type="button" onClick={() => setFormulario((p) => ({ ...p, cuenta_tarjeta_id: cuenta.id, tarjeta_fisica_id: '' }))} className={`w-full rounded-xl border p-3 text-left ${formulario.cuenta_tarjeta_id === cuenta.id ? 'border-emerald-500 bg-emerald-50' : ''}`}><p className="font-medium">{cuenta.nombre_cuenta}</p><p className="text-xs text-slate-500">{cuenta.banco ?? ''} {cuenta.marca ?? ''}</p></button>)}</div></div>
 <div><p className="mb-2 text-sm font-medium">Tarjeta física *</p><div className="space-y-2">{tarjetasCuenta.map((tarjeta) => <button key={tarjeta.id} type="button" onClick={() => setFormulario((p) => ({ ...p, tarjeta_fisica_id: tarjeta.id, persona_id: tarjeta.persona_id }))} className={`w-full rounded-xl border p-3 text-left ${formulario.tarjeta_fisica_id === tarjeta.id ? 'border-emerald-500 bg-emerald-50' : ''}`}>{tarjeta.alias ?? tarjeta.tipo} {tarjeta.ultimos_4_digitos ? `• ${tarjeta.ultimos_4_digitos}` : ''}</button>)}</div></div>
 <div><label className="text-sm font-medium">Cantidad de cuotas *</label><input type="number" min={1} value={formulario.cantidad_cuotas} onChange={(e) => setFormulario((p) => ({ ...p, cantidad_cuotas: Number(e.target.value) || 1 }))} className="mt-1 w-full rounded-xl border px-3 py-2" /></div></>}
-<div className="rounded-xl border border-slate-200 p-3"><p className="text-sm font-medium">Comprobante</p><p className="text-xs text-slate-600">Opcional: adjuntá foto o PDF del ticket/factura.</p><label className="mt-2 inline-flex cursor-pointer rounded-xl border px-3 py-2 text-sm">Seleccionar comprobante<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" onChange={(e) => setComprobante(e.target.files?.[0] ?? null)} /></label>{comprobante ? <div className="mt-2 flex items-center justify-between gap-2 text-xs"><span className="truncate">{comprobante.name}</span><button type="button" onClick={() => setComprobante(null)} className="rounded border px-2 py-1">Quitar</button></div> : <p className="mt-2 text-xs text-slate-500">Sin comprobante seleccionado.</p>}</div>
+<div className="rounded-xl border border-slate-200 p-3"><p className="text-sm font-medium">Comprobante</p><p className="text-xs text-slate-600">Opcional: adjuntá una foto, imagen o PDF del ticket/factura.</p><p className="mt-1 text-xs text-slate-500">También podés pegar una imagen copiada desde WhatsApp.</p><div onPaste={manejarPegadoComprobante} onDragOver={(event) => { event.preventDefault(); setArrastrandoComprobante(true); }} onDragLeave={() => setArrastrandoComprobante(false)} onDrop={manejarDropComprobante} className={`mt-2 rounded-xl border border-dashed p-3 ${arrastrandoComprobante ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 bg-slate-50'}`}><p className="text-xs text-slate-600">Arrastrá una imagen/PDF acá o pegá una imagen copiada.</p><div className="mt-3 grid gap-2 sm:grid-cols-3"><button type="button" onClick={() => inputCamaraRef.current?.click()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Tomar foto del comprobante</button><button type="button" onClick={() => inputSubirRef.current?.click()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Subir imagen o PDF</button><button type="button" onClick={() => setMensajeComprobante('Usá pegar (Ctrl+V / ⌘V) dentro de esta zona para adjuntar la imagen copiada.')} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Pegar imagen copiada</button></div><input ref={inputCamaraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={manejarCambioArchivo} /><input ref={inputSubirRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={manejarCambioArchivo} /></div>{mensajeComprobante ? <p className="mt-2 text-xs text-slate-500">{mensajeComprobante}</p> : null}{comprobante ? <div className="mt-2 space-y-1 text-xs"><p className="truncate"><span className="font-medium">Archivo:</span> {comprobante.name}</p><p><span className="font-medium">Tipo:</span> {comprobante.type || 'Sin tipo'}</p><p><span className="font-medium">Tamaño:</span> {formatearTamanoArchivo(comprobante.size)}</p><button type="button" onClick={() => setComprobante(null)} className="rounded border px-2 py-1">Quitar comprobante</button></div> : <p className="mt-2 text-xs text-slate-500">Sin comprobante seleccionado.</p>}</div>
 <div><label className="text-sm font-medium">Persona *</label><select value={formulario.persona_id} onChange={(e) => setFormulario((p) => ({ ...p, persona_id: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2"><option value="">Seleccionar persona</option>{personas.map((persona) => <option key={persona.id} value={persona.id}>{persona.nombre} {persona.apellido ?? ''}</option>)}</select></div>
 <button type="button" onClick={() => setMostrarAvanzado((v) => !v)} className="text-sm text-slate-600">{mostrarAvanzado ? 'Ocultar campos avanzados' : 'Mostrar campos avanzados'}</button>
 {mostrarAvanzado && <div className="grid gap-2"><input value={formulario.descripcion} onChange={(e) => setFormulario((p) => ({ ...p, descripcion: e.target.value }))} className="rounded-xl border px-3 py-2" placeholder="Descripción" /><textarea value={formulario.observaciones} onChange={(e) => setFormulario((p) => ({ ...p, observaciones: e.target.value }))} className="rounded-xl border px-3 py-2" placeholder="Observaciones" /></div>}
