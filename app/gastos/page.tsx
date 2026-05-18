@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { MENSAJE_ERROR_BUCKET_COMPROBANTES, normalizarNombreArchivo, validarComprobante } from '@/lib/comprobantes';
 import {
@@ -75,6 +75,22 @@ type Filtros = {
 const ESTADOS_EDITABLES_CUOTA = new Set(['pendiente', 'proyectada', 'no_incluida', 'reprogramada']);
 const FILTROS_INICIALES: Filtros = { busqueda: '', fecha_desde: '', fecha_hasta: '', categoria_id: '', persona_id: '', medio_pago_id: '', cuenta_tarjeta_id: '', tarjeta_fisica_id: '', estado_registro: 'activos' };
 
+function formatearTamanoArchivo(tamano: number) {
+  if (tamano < 1024 * 1024) return `${(tamano / 1024).toFixed(1)} KB`;
+  return `${(tamano / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function crearNombreComprobantePegado() {
+  const fecha = new Date();
+  const yyyy = fecha.getFullYear();
+  const mm = String(fecha.getMonth() + 1).padStart(2, '0');
+  const dd = String(fecha.getDate()).padStart(2, '0');
+  const hh = String(fecha.getHours()).padStart(2, '0');
+  const min = String(fecha.getMinutes()).padStart(2, '0');
+  return `comprobante-pegado-${yyyy}-${mm}-${dd}-${hh}${min}.png`;
+}
+
+
 export default function Page() {
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [cuotas, setCuotas] = useState<CuotaTarjeta[]>([]);
@@ -89,6 +105,11 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [mensajeExito, setMensajeExito] = useState<string | null>(null);
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([]);
+  const [comprobanteNuevo, setComprobanteNuevo] = useState<File | null>(null);
+  const [mensajeComprobante, setMensajeComprobante] = useState<string | null>(null);
+  const [arrastrandoComprobante, setArrastrandoComprobante] = useState(false);
+  const inputSubirRef = useRef<HTMLInputElement | null>(null);
+  const inputCamaraRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => { void cargarDatos(); }, []);
 
@@ -287,6 +308,37 @@ export default function Page() {
   }
 
 
+
+
+  function seleccionarComprobante(archivo: File | null) {
+    if (!archivo) return;
+    const validacion = validarComprobante(archivo);
+    if (!validacion.valido) return setError(validacion.mensaje);
+    setComprobanteNuevo(archivo);
+    setMensajeComprobante(null);
+    setError(null);
+  }
+
+  function manejarCambioArchivo(event: ChangeEvent<HTMLInputElement>) {
+    seleccionarComprobante(event.target.files?.[0] ?? null);
+    event.currentTarget.value = '';
+  }
+
+  function manejarPegadoComprobante(event: ClipboardEvent<HTMLDivElement>) {
+    const item = Array.from(event.clipboardData.items).find((clipboardItem) => clipboardItem.type.startsWith('image/'));
+    if (!item) return setMensajeComprobante('No se detectó una imagen en el portapapeles.');
+    event.preventDefault();
+    const blob = item.getAsFile();
+    if (!blob) return setMensajeComprobante('No se detectó una imagen en el portapapeles.');
+    seleccionarComprobante(new File([blob], crearNombreComprobantePegado(), { type: 'image/png' }));
+  }
+
+  function manejarDropComprobante(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setArrastrandoComprobante(false);
+    seleccionarComprobante(event.dataTransfer.files?.[0] ?? null);
+  }
+
   async function agregarComprobanteAGasto(gastoId: string, archivo: File | null) {
     if (!archivo) return;
     const validacion = validarComprobante(archivo);
@@ -316,6 +368,7 @@ export default function Page() {
       });
       if (error) throw error;
       setMensajeExito('Comprobante agregado correctamente.');
+      setComprobanteNuevo(null);
       await cargarDatos();
     } catch (error) {
       console.error(error);
@@ -380,7 +433,7 @@ export default function Page() {
       {gastoEditandoTieneCuotas ? <p className="text-xs text-slate-500">Medio de pago, fecha y monto están bloqueados para mantener consistencia con cuotas generadas.</p> : null}
       <button className="rounded-xl bg-emerald-600 px-3 py-2 text-white">Guardar cambios</button>
 
-      <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Comprobantes</h3><p className="text-xs text-slate-600">Adjuntá imagen o PDF al gasto seleccionado.</p><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => void agregarComprobanteAGasto(gastoEditando.id, event.target.files?.[0] ?? null)} className="w-full rounded-xl border px-3 py-2 text-xs" />{comprobantesGastoEditando.length === 0 ? <p className="text-xs text-slate-500">Sin comprobantes asociados.</p> : comprobantesGastoEditando.map((comprobante) => <div key={comprobante.id} className="rounded-lg border p-2 text-xs"><p className="font-medium">{comprobante.nombre_archivo ?? 'Archivo sin nombre'}</p><p className="text-slate-500">{comprobante.tipo_archivo}</p>{comprobante.url_storage ? <a href={comprobante.url_storage} target="_blank" rel="noreferrer" className="text-emerald-700 underline">Abrir / descargar</a> : <p className="text-slate-500">Sin URL disponible.</p>}</div>)}</div>
+      <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Comprobante</h3><p className="text-xs text-slate-600">Opcional: adjuntá una foto, imagen o PDF del ticket/factura.</p><p className="text-xs text-slate-500">También podés pegar una imagen copiada desde WhatsApp.</p><div onPaste={manejarPegadoComprobante} onDragOver={(event) => { event.preventDefault(); setArrastrandoComprobante(true); }} onDragLeave={() => setArrastrandoComprobante(false)} onDrop={manejarDropComprobante} className={`rounded-xl border border-dashed p-3 ${arrastrandoComprobante ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 bg-slate-50'}`}><p className="text-xs text-slate-600">Arrastrá una imagen/PDF acá o pegá una imagen copiada.</p><div className="mt-2 grid gap-2 sm:grid-cols-3"><button type="button" onClick={() => inputCamaraRef.current?.click()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Tomar foto del comprobante</button><button type="button" onClick={() => inputSubirRef.current?.click()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Subir imagen o PDF</button><button type="button" onClick={() => setMensajeComprobante('Usá pegar (Ctrl+V / ⌘V) dentro de esta zona para adjuntar la imagen copiada.')} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Pegar imagen copiada</button></div><input ref={inputCamaraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={manejarCambioArchivo} /><input ref={inputSubirRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={manejarCambioArchivo} /></div>{mensajeComprobante ? <p className="text-xs text-slate-500">{mensajeComprobante}</p> : null}{comprobanteNuevo ? <div className="rounded-lg border p-2 text-xs"><p className="truncate"><strong>Archivo:</strong> {comprobanteNuevo.name}</p><p><strong>Tipo:</strong> {comprobanteNuevo.type || 'Sin tipo'}</p><p><strong>Tamaño:</strong> {formatearTamanoArchivo(comprobanteNuevo.size)}</p><div className="mt-2 flex gap-2"><button type="button" onClick={() => void agregarComprobanteAGasto(gastoEditando.id, comprobanteNuevo)} className="rounded bg-emerald-600 px-2 py-1 text-white">Adjuntar comprobante</button><button type="button" onClick={() => setComprobanteNuevo(null)} className="rounded border px-2 py-1">Quitar comprobante</button></div></div> : <p className="text-xs text-slate-500">Sin comprobante seleccionado.</p>}{comprobantesGastoEditando.length === 0 ? <p className="text-xs text-slate-500">Sin comprobantes asociados.</p> : comprobantesGastoEditando.map((comprobante) => <div key={comprobante.id} className="rounded-lg border p-2 text-xs"><p className="font-medium">{comprobante.nombre_archivo ?? 'Archivo sin nombre'}</p><p className="text-slate-500">{comprobante.tipo_archivo}</p>{comprobante.url_storage ? <a href={comprobante.url_storage} target="_blank" rel="noreferrer" className="text-emerald-700 underline">Abrir / descargar</a> : <p className="text-slate-500">Sin URL disponible.</p>}</div>)}</div>
 
       <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Cuotas asociadas</h3>
         {cuotasGastoEditando.map((cuota) => <div key={cuota.id} className="rounded-xl border p-2 text-sm">
