@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 
 type CuentaTarjeta = {
@@ -153,6 +153,7 @@ export default function FlujoPage() {
   const [error, setError] = useState<string | null>(null);
   const [celdaActiva, setCeldaActiva] = useState<{ tipo: 'tarjeta' | 'gasto_directo'; clave: string; periodo: string } | null>(null);
   const [mostrarDesglose, setMostrarDesglose] = useState(false);
+  const [filasExpandidas, setFilasExpandidas] = useState<Record<string, boolean>>({});
 
   const [filtros, setFiltros] = useState<Filtros>({
     mesInicial: obtenerPeriodoActual(),
@@ -419,6 +420,21 @@ export default function FlujoPage() {
     });
   };
 
+  const alternarFila = (clave: string) => {
+    setFilasExpandidas((actual) => ({ ...actual, [clave]: !actual[clave] }));
+  };
+
+  const expandirTodo = () => {
+    const siguiente: Record<string, boolean> = {};
+    for (const medio of mediosPagoVisibles) siguiente[`medio:${medio.id}`] = true;
+    for (const cuenta of cuentasVisibles) siguiente[`cuenta:${cuenta.id}`] = true;
+    setFilasExpandidas(siguiente);
+  };
+
+  const contraerTodo = () => {
+    setFilasExpandidas({});
+  };
+
   return (
     <section className="space-y-4">
       <header className="space-y-1">
@@ -467,6 +483,12 @@ export default function FlujoPage() {
         />
         Mostrar desglose de cuotas
       </label>
+      {mostrarDesglose && (
+        <div className="flex gap-2">
+          <button onClick={expandirTodo} className="rounded-lg border bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50">Expandir todo</button>
+          <button onClick={contraerTodo} className="rounded-lg border bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50">Contraer todo</button>
+        </div>
+      )}
 
       {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
       {cargando && <p className="rounded-xl border bg-white px-3 py-2 text-sm">Cargando flujo mensual...</p>}
@@ -492,8 +514,15 @@ export default function FlujoPage() {
               <tbody>
                 {mediosPagoVisibles.map((medio) => {
                   const totalMedio = periodos.reduce((acc, periodo) => acc + (matrizGastosDirectos.get(medio.id)?.get(periodo) ?? 0), 0);
-                  return <tr key={medio.id} className="border-t bg-amber-50/40">
-                    <td className="px-3 py-2 font-medium">Gasto directo · {medio.nombre}</td>
+                  const claveFila = `medio:${medio.id}`;
+                  const filaExpandida = mostrarDesglose && !!filasExpandidas[claveFila];
+                  const gastosFila = gastosDirectosFiltrados.filter((gasto) => gasto.medio_pago_id === medio.id);
+                  return <Fragment key={medio.id}>
+                  <tr key={medio.id} className="border-t bg-amber-50/40">
+                    <td className="px-3 py-2 font-semibold">
+                      <button onClick={() => alternarFila(claveFila)} disabled={!mostrarDesglose} className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-white text-xs disabled:opacity-40">{filaExpandida ? '−' : '+'}</button>
+                      Gasto directo · {medio.nombre}
+                    </td>
                     <td className="px-3 py-2 text-slate-400">—</td>
                     <td className="px-3 py-2 text-right text-slate-400">—</td>
                     <td className="px-3 py-2 text-right text-slate-400">—</td>
@@ -503,16 +532,36 @@ export default function FlujoPage() {
                       return <td key={periodo} className="px-3 py-2 text-right tabular-nums"><button onClick={() => manejarClickCelda('gasto_directo', medio.id, periodo, monto)} className={`w-full rounded-lg px-2 py-1 text-right transition ${activa ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300' : 'hover:bg-slate-100'}`} disabled={monto <= 0}>{monto > 0 ? formatearMonto(monto, 'ARS') : '—'}</button></td>;
                     })}
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatearMonto(totalMedio, 'ARS')}</td>
-                  </tr>;
+                  </tr>
+                    {filaExpandida && gastosFila.map((gasto) => {
+                      const periodoGasto = obtenerPeriodoDesdeFecha(gasto.fecha_gasto);
+                      return <tr key={`gasto-${gasto.id}`} className="border-t bg-amber-50/20 align-top">
+                        <td className="px-3 py-2 pl-8">
+                          <p className="font-medium">{gasto.establecimiento}</p>
+                          <p className="text-slate-600">{gasto.descripcion ?? 'Sin descripción'}</p>
+                          <p className="text-slate-500">Fecha: {gasto.fecha_gasto.slice(0, 10)} · Categoría: {gasto.categoria?.nombre ?? 'Sin categoría'} · Persona: {gasto.persona ? `${gasto.persona.nombre} ${gasto.persona.apellido ?? ''}`.trim() : 'Sin persona'}</p>
+                        </td>
+                        <td className="px-3 py-2 text-slate-500">Directo</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatearMonto(gasto.monto, gasto.moneda)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatearMonto(gasto.monto, gasto.moneda)}</td>
+                        {periodos.map((periodo) => <td key={`${gasto.id}-${periodo}`} className="px-3 py-2 text-right tabular-nums">{periodo === periodoGasto ? formatearMonto(gasto.monto, gasto.moneda) : '—'}</td>)}
+                        <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatearMonto(gasto.monto, gasto.moneda)}</td>
+                      </tr>;
+                    })}
+                  </Fragment>;
                 })}
                 {cuentasVisibles.map((cuenta) => {
                   const totalCuenta = periodos.reduce((acc, periodo) => acc + (matriz.get(cuenta.id)?.get(periodo) ?? 0), 0);
                   const gruposCuenta = desglosePorCuenta.get(cuenta.id) ?? [];
-                  const filaExpandida = mostrarDesglose && gruposCuenta.length > 0;
+                  const claveFila = `cuenta:${cuenta.id}`;
+                  const filaExpandida = mostrarDesglose && gruposCuenta.length > 0 && !!filasExpandidas[claveFila];
                   return (
-                    <>
+                    <Fragment key={cuenta.id}>
                     <tr key={cuenta.id} className="border-t">
-                        <td className="px-3 py-2 font-medium">{cuenta.nombre_cuenta}</td>
+                        <td className="px-3 py-2 font-semibold">
+                          <button onClick={() => alternarFila(claveFila)} disabled={!mostrarDesglose || gruposCuenta.length === 0} className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-white text-xs disabled:opacity-40">{filaExpandida ? '−' : '+'}</button>
+                          {cuenta.nombre_cuenta}
+                        </td>
                         <td className="px-3 py-2 text-slate-400">—</td>
                         <td className="px-3 py-2 text-right text-slate-400">—</td>
                         <td className="px-3 py-2 text-right text-slate-400">—</td>
@@ -552,7 +601,7 @@ export default function FlujoPage() {
                           <td className="px-3 py-2 text-right tabular-nums font-semibold">{formatearMonto(totalGrupo, grupo.moneda)}</td>
                         </tr>;
                       })}
-                    </>
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -572,25 +621,42 @@ export default function FlujoPage() {
           <div className="space-y-3 md:hidden">
             {mediosPagoVisibles.map((medio) => (
               <article key={medio.id} className="rounded-2xl border bg-amber-50/50 p-3">
-                <h3 className="font-semibold">Gasto directo · {medio.nombre}</h3>
+                <button disabled={!mostrarDesglose} onClick={() => alternarFila(`medio:${medio.id}`)} className="flex w-full items-center justify-between text-left">
+                  <h3 className="font-semibold">Gasto directo · {medio.nombre}</h3>
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded border bg-white text-xs">{mostrarDesglose && filasExpandidas[`medio:${medio.id}`] ? '−' : '+'}</span>
+                </button>
                 <div className="mt-2 space-y-2">
                   {periodos.map((periodo) => {
                     const monto = matrizGastosDirectos.get(medio.id)?.get(periodo) ?? 0;
                     return <button key={periodo} onClick={() => manejarClickCelda('gasto_directo', medio.id, periodo, monto)} className="flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm"><span>{periodo}</span><span className="font-semibold">{monto > 0 ? formatearMonto(monto, 'ARS') : '—'}</span></button>;
                   })}
                 </div>
+                {mostrarDesglose && filasExpandidas[`medio:${medio.id}`] && (
+                  <div className="mt-3 space-y-2">
+                    {gastosDirectosFiltrados.filter((gasto) => gasto.medio_pago_id === medio.id).map((gasto) => (
+                      <article key={gasto.id} className="rounded-xl border bg-white p-2 text-xs">
+                        <p className="font-semibold">{gasto.establecimiento}</p>
+                        <p className="text-slate-600">{gasto.descripcion ?? 'Sin descripción'}</p>
+                        <p className="text-slate-500">{gasto.fecha_gasto.slice(0, 10)} · {gasto.categoria?.nombre ?? 'Sin categoría'} · {formatearMonto(gasto.monto, gasto.moneda)}</p>
+                      </article>
+                    ))}
+                  </div>
+                )}
               </article>
             ))}
             {cuentasVisibles.map((cuenta) => (
               <article key={cuenta.id} className="rounded-2xl border bg-white p-3">
-                <h3 className="font-semibold">{cuenta.nombre_cuenta}</h3>
+                <button disabled={!mostrarDesglose} onClick={() => alternarFila(`cuenta:${cuenta.id}`)} className="flex w-full items-center justify-between text-left">
+                  <h3 className="font-semibold">{cuenta.nombre_cuenta}</h3>
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded border bg-white text-xs">{mostrarDesglose && filasExpandidas[`cuenta:${cuenta.id}`] ? '−' : '+'}</span>
+                </button>
                 <div className="mt-2 space-y-2">
                   {periodos.map((periodo) => {
                     const monto = matriz.get(cuenta.id)?.get(periodo) ?? 0;
                     return <button key={periodo} onClick={() => manejarClickCelda('tarjeta', cuenta.id, periodo, monto)} className="flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm"><span>{periodo}</span><span className="font-semibold">{monto > 0 ? formatearMonto(monto, 'ARS') : '—'}</span></button>;
                   })}
                 </div>
-                {mostrarDesglose && (
+                {mostrarDesglose && filasExpandidas[`cuenta:${cuenta.id}`] && (
                   <div className="mt-3 space-y-3">
                     {(desglosePorCuenta.get(cuenta.id) ?? []).map((grupo) => (<article key={grupo.clave} className="rounded-xl border bg-slate-50 p-2 text-xs"><p className="font-semibold">{grupo.establecimiento}</p><p className="text-slate-600">{grupo.descripcion} · {grupo.cuotasPendientes}</p><div className="mt-1 grid grid-cols-2 gap-1">{periodos.map((periodo) => <div key={periodo} className="rounded border bg-white px-2 py-1"><p className="text-[11px] text-slate-500">{periodo}</p><p className="font-semibold">{(grupo.montosPorPeriodo.get(periodo) ?? 0) > 0 ? formatearMonto(grupo.montosPorPeriodo.get(periodo) ?? 0, grupo.moneda) : '—'}</p></div>)}</div></article>))}
                   </div>
