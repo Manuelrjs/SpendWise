@@ -105,12 +105,32 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 3. En esta fase los comprobantes (imagen/PDF) se guardan en Supabase Storage y se registra su metadata en la tabla `comprobantes`.
 4. El archivado histórico hacia Google Drive queda pendiente para una fase posterior (no implementado en Fase 1.5).
 
-## Extracción automática de comprobantes
+## Extracción automática de comprobantes (imágenes)
 
-En esta fase se deja preparada la extracción de datos desde comprobantes para prellenar el formulario de **Nuevo gasto**.
+La pantalla **/gastos/nuevo** permite analizar comprobantes con OpenAI Vision para sugerir datos antes de guardar.
 
-- La IA/OCR solo sugiere datos (fecha, establecimiento, monto, moneda, categoría/medio de pago sugeridos, descripción y observaciones).
-- El usuario siempre debe revisar, corregir y confirmar antes de guardar.
-- No se guarda ningún gasto automáticamente durante el análisis.
-- Si no hay API configurada, la app muestra el mensaje: **"La extracción automática aún no está configurada."**
-- Las claves de IA deben configurarse del lado servidor (por ejemplo `IA_COMPROBANTES_ENDPOINT` y `IA_COMPROBANTES_API_KEY`), nunca como variables `NEXT_PUBLIC`.
+### Configuración
+
+1. Agregar la API key en `.env.local`:
+
+```bash
+OPENAI_API_KEY=
+# opcional: OPENAI_VISION_MODEL=gpt-4o-mini
+```
+
+2. Reiniciar el servidor (`npm run dev`).
+
+### Alcance actual
+
+- Solo se procesan imágenes (`jpg`, `jpeg`, `png`, `webp`).
+- PDF todavía no se procesa y muestra: **"La lectura automática de PDF se implementará en una fase posterior."**
+- El análisis se ejecuta **server-side** en `POST /api/comprobantes/analizar`.
+- La API key debe quedar del lado servidor y **nunca** en variables `NEXT_PUBLIC`.
+
+### Comportamiento funcional
+
+- La IA devuelve sugerencias de: fecha, establecimiento, monto total, moneda, categoría sugerida, medio de pago sugerido, identificador fiscal, descripción, observaciones, confianza y advertencias.
+- El usuario puede **Aplicar sugerencias** o **Descartar sugerencias**.
+- El usuario siempre valida antes de guardar.
+- El gasto **no** se guarda automáticamente al analizar el comprobante.
+- Si falta `OPENAI_API_KEY`, la app muestra: **"La extracción automática aún no está configurada."**
