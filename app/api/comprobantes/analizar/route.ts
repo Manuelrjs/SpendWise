@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { TAMANO_MAXIMO_COMPROBANTE_BYTES } from '@/lib/comprobantes';
 
 const TIPOS_IMAGEN = ['image/jpeg', 'image/png', 'image/webp'];
-const OPENAI_MODEL = process.env.OPENAI_VISION_MODEL ?? 'gpt-4o-mini';
+const OPENAI_MODEL = 'gpt-4o-mini';
+const MENSAJE_ERROR_ANALISIS = 'No se pudo analizar el comprobante';
 
 type DatosComprobanteSugeridos = {
   fecha_gasto: string;
@@ -56,6 +57,36 @@ function limpiarRespuesta(payload: unknown): DatosComprobanteSugeridos {
   return base;
 }
 
+function limpiarJsonDeMarkdown(texto: string): string {
+  const textoLimpio = texto.trim();
+
+  if (!textoLimpio.startsWith('```')) {
+    return textoLimpio;
+  }
+
+  return textoLimpio
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
+}
+
+function extraerDetalleError(error: unknown): { mensaje: string; status?: number; data?: unknown; stack?: string } {
+  if (error instanceof Error) {
+    const e = error as Error & { status?: number; response?: { data?: unknown } };
+    return {
+      mensaje: e.message,
+      status: e.status,
+      data: e.response?.data,
+      stack: e.stack,
+    };
+  }
+
+  return {
+    mensaje: typeof error === 'string' ? error : 'Error desconocido',
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
@@ -84,13 +115,10 @@ export async function POST(request: Request) {
     }
 
     if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json({
-        sugerencias: {
-          ...RESPUESTA_POR_DEFECTO,
-          observaciones: 'La extracción automática aún no está configurada.',
-          advertencias: ['La extracción automática aún no está configurada.'],
-        } satisfies DatosComprobanteSugeridos,
-      });
+      return NextResponse.json(
+        { error: 'La extracción automática aún no está configurada.' },
+        { status: 500 },
+      );
     }
 
     const bytes = await archivo.arrayBuffer();
@@ -142,32 +170,48 @@ Reglas:
     });
 
     if (!respuestaOpenAI.ok) {
-      const detalle = await respuestaOpenAI.text();
-      console.error('Error OpenAI:', detalle);
-      return NextResponse.json(
-        { mensaje: 'No se pudo analizar el comprobante. Podés cargar el gasto manualmente.' },
-        { status: 502 },
-      );
+      const textoError = await respuestaOpenAI.text();
+      throw Object.assign(new Error('Error de OpenAI al analizar el comprobante.'), {
+        status: respuestaOpenAI.status,
+        response: { data: textoError },
+      });
     }
 
     const data = (await respuestaOpenAI.json()) as { output_text?: string };
     const contenido = data.output_text;
 
     if (!contenido) {
+      return NextResponse.json({ error: MENSAJE_ERROR_ANALISIS }, { status: 502 });
+    }
+
+    const contenidoLimpio = limpiarJsonDeMarkdown(contenido);
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(contenidoLimpio) as unknown;
+    } catch {
       return NextResponse.json(
-        { mensaje: 'No se pudo analizar el comprobante. Podés cargar el gasto manualmente.' },
+        { error: MENSAJE_ERROR_ANALISIS, detalle: 'No se pudo interpretar la respuesta de IA.' },
         { status: 502 },
       );
     }
 
-    const parsed = JSON.parse(contenido) as unknown;
-
     return NextResponse.json({ sugerencias: limpiarRespuesta(parsed) });
   } catch (error) {
-    console.error(error);
+    const detalle = extraerDetalleError(error);
+    console.error('Error en /api/comprobantes/analizar', {
+      mensaje: detalle.mensaje,
+      status: detalle.status,
+      data: detalle.data,
+      stack: detalle.stack,
+    });
+
     return NextResponse.json(
-      { mensaje: 'No se pudo analizar el comprobante. Podés cargar el gasto manualmente.' },
-      { status: 500 },
+      {
+        error: MENSAJE_ERROR_ANALISIS,
+        ...(process.env.NODE_ENV === 'development' ? { detalle: detalle.mensaje } : {}),
+      },
+      { status: 502 },
     );
   }
 }
