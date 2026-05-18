@@ -104,3 +104,13 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 2. Verificar que exista el bucket de Storage llamado `comprobantes` (crear uno público o con políticas de lectura según tu entorno).
 3. En esta fase los comprobantes (imagen/PDF) se guardan en Supabase Storage y se registra su metadata en la tabla `comprobantes`.
 4. El archivado histórico hacia Google Drive queda pendiente para una fase posterior (no implementado en Fase 1.5).
+
+## Extracción automática de comprobantes
+
+En esta fase se deja preparada la extracción de datos desde comprobantes para prellenar el formulario de **Nuevo gasto**.
+
+- La IA/OCR solo sugiere datos (fecha, establecimiento, monto, moneda, categoría/medio de pago sugeridos, descripción y observaciones).
+- El usuario siempre debe revisar, corregir y confirmar antes de guardar.
+- No se guarda ningún gasto automáticamente durante el análisis.
+- Si no hay API configurada, la app muestra el mensaje: **"La extracción automática aún no está configurada."**
+- Las claves de IA deben configurarse del lado servidor (por ejemplo `IA_COMPROBANTES_ENDPOINT` y `IA_COMPROBANTES_API_KEY`), nunca como variables `NEXT_PUBLIC`.
