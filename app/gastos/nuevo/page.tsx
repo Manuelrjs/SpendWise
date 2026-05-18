@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { MENSAJE_ERROR_BUCKET_COMPROBANTES, normalizarNombreArchivo, validarComprobante } from '@/lib/comprobantes';
 import {
   calcularPeriodoTarjeta,
   CalendarioTarjeta,
@@ -38,6 +39,7 @@ export default function Page() {
   const [advertencia, setAdvertencia] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [mostrarAvanzado, setMostrarAvanzado] = useState(false);
+  const [comprobante, setComprobante] = useState<File | null>(null);
 
   const medioSeleccionado = useMemo(() => medios.find((medio) => medio.id === formulario.medio_pago_id), [medios, formulario.medio_pago_id]);
   const esTarjetaCredito = medioSeleccionado?.tipo === 'tarjeta_credito';
@@ -87,11 +89,50 @@ export default function Page() {
     if (!formulario.categoria_id) return setError('Seleccioná una categoría.');
     if (!formulario.persona_id) return setError('Seleccioná una persona.');
     if (esTarjetaCredito && (!formulario.cuenta_tarjeta_id || !formulario.tarjeta_fisica_id || formulario.cantidad_cuotas < 1)) return setError('Para tarjeta de crédito completá cuenta, tarjeta física y cuotas válidas.');
+    if (comprobante) {
+      const validacionComprobante = validarComprobante(comprobante);
+      if (!validacionComprobante.valido) return setError(validacionComprobante.mensaje);
+    }
     setGuardando(true);
     try {
       const payload = { ...formulario, monto, establecimiento: formulario.establecimiento.trim(), cuenta_tarjeta_id: esTarjetaCredito ? formulario.cuenta_tarjeta_id : null, tarjeta_fisica_id: esTarjetaCredito ? formulario.tarjeta_fisica_id : null, cantidad_cuotas: esTarjetaCredito ? formulario.cantidad_cuotas : 1 };
       const { data: gasto, error: eg } = await supabase.from('gastos').insert(payload).select('id').single();
       if (eg || !gasto) throw new Error('No se pudo guardar el gasto.');
+
+      if (comprobante) {
+        const fechaComprobante = formulario.fecha_gasto ? new Date(`${formulario.fecha_gasto}T00:00:00`) : new Date();
+        const anio = String(fechaComprobante.getFullYear());
+        const mes = String(fechaComprobante.getMonth() + 1).padStart(2, '0');
+        const nombreArchivo = normalizarNombreArchivo(comprobante.name);
+        const rutaStorage = `${anio}/${mes}/${gasto.id}/${nombreArchivo}`;
+
+        const { error: errorStorage } = await supabase.storage.from('comprobantes').upload(rutaStorage, comprobante, { upsert: false, contentType: comprobante.type });
+        if (errorStorage) {
+          console.error(errorStorage);
+          throw new Error(MENSAJE_ERROR_BUCKET_COMPROBANTES);
+        }
+
+        const { data: urlFirmada, error: errorUrl } = await supabase.storage.from('comprobantes').createSignedUrl(rutaStorage, 60 * 60 * 24 * 7);
+        if (errorUrl) {
+          console.error(errorUrl);
+        }
+
+        const { error: errorComprobante } = await supabase.from('comprobantes').insert({
+          gasto_id: gasto.id,
+          tipo_comprobante: comprobante.type === 'application/pdf' ? 'factura_pdf' : 'ticket_imagen',
+          tipo_archivo: comprobante.type,
+          nombre_archivo: comprobante.name,
+          ruta_storage: rutaStorage,
+          url_storage: urlFirmada?.signedUrl ?? null,
+          proveedor_almacenamiento: 'supabase',
+          estado_archivo: 'activo',
+          tamano_bytes: comprobante.size,
+        });
+        if (errorComprobante) {
+          console.error(errorComprobante);
+          throw new Error('Se guardó el gasto pero no se pudo asociar el comprobante.');
+        }
+      }
 
       if (esTarjetaCredito) {
         const cuenta = cuentas.find((c) => c.id === formulario.cuenta_tarjeta_id);
@@ -133,7 +174,9 @@ export default function Page() {
 
       setMensaje('Gasto registrado con éxito.');
       setFormulario({ ...inicial, fecha_gasto: HOY });
+      setComprobante(null);
     } catch (e) {
+      console.error(e);
       setError(e instanceof Error ? e.message : 'Ocurrió un error al guardar el gasto.');
     } finally { setGuardando(false); }
   }
@@ -144,6 +187,7 @@ export default function Page() {
 {esTarjetaCredito && <><div><p className="mb-2 text-sm font-medium">Cuenta de tarjeta *</p><div className="space-y-2">{cuentas.map((cuenta) => <button key={cuenta.id} type="button" onClick={() => setFormulario((p) => ({ ...p, cuenta_tarjeta_id: cuenta.id, tarjeta_fisica_id: '' }))} className={`w-full rounded-xl border p-3 text-left ${formulario.cuenta_tarjeta_id === cuenta.id ? 'border-emerald-500 bg-emerald-50' : ''}`}><p className="font-medium">{cuenta.nombre_cuenta}</p><p className="text-xs text-slate-500">{cuenta.banco ?? ''} {cuenta.marca ?? ''}</p></button>)}</div></div>
 <div><p className="mb-2 text-sm font-medium">Tarjeta física *</p><div className="space-y-2">{tarjetasCuenta.map((tarjeta) => <button key={tarjeta.id} type="button" onClick={() => setFormulario((p) => ({ ...p, tarjeta_fisica_id: tarjeta.id, persona_id: tarjeta.persona_id }))} className={`w-full rounded-xl border p-3 text-left ${formulario.tarjeta_fisica_id === tarjeta.id ? 'border-emerald-500 bg-emerald-50' : ''}`}>{tarjeta.alias ?? tarjeta.tipo} {tarjeta.ultimos_4_digitos ? `• ${tarjeta.ultimos_4_digitos}` : ''}</button>)}</div></div>
 <div><label className="text-sm font-medium">Cantidad de cuotas *</label><input type="number" min={1} value={formulario.cantidad_cuotas} onChange={(e) => setFormulario((p) => ({ ...p, cantidad_cuotas: Number(e.target.value) || 1 }))} className="mt-1 w-full rounded-xl border px-3 py-2" /></div></>}
+<div className="rounded-xl border border-slate-200 p-3"><p className="text-sm font-medium">Comprobante</p><p className="text-xs text-slate-600">Opcional: adjuntá foto o PDF del ticket/factura.</p><label className="mt-2 inline-flex cursor-pointer rounded-xl border px-3 py-2 text-sm">Seleccionar comprobante<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" onChange={(e) => setComprobante(e.target.files?.[0] ?? null)} /></label>{comprobante ? <div className="mt-2 flex items-center justify-between gap-2 text-xs"><span className="truncate">{comprobante.name}</span><button type="button" onClick={() => setComprobante(null)} className="rounded border px-2 py-1">Quitar</button></div> : <p className="mt-2 text-xs text-slate-500">Sin comprobante seleccionado.</p>}</div>
 <div><label className="text-sm font-medium">Persona *</label><select value={formulario.persona_id} onChange={(e) => setFormulario((p) => ({ ...p, persona_id: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2"><option value="">Seleccionar persona</option>{personas.map((persona) => <option key={persona.id} value={persona.id}>{persona.nombre} {persona.apellido ?? ''}</option>)}</select></div>
 <button type="button" onClick={() => setMostrarAvanzado((v) => !v)} className="text-sm text-slate-600">{mostrarAvanzado ? 'Ocultar campos avanzados' : 'Mostrar campos avanzados'}</button>
 {mostrarAvanzado && <div className="grid gap-2"><input value={formulario.descripcion} onChange={(e) => setFormulario((p) => ({ ...p, descripcion: e.target.value }))} className="rounded-xl border px-3 py-2" placeholder="Descripción" /><textarea value={formulario.observaciones} onChange={(e) => setFormulario((p) => ({ ...p, observaciones: e.target.value }))} className="rounded-xl border px-3 py-2" placeholder="Observaciones" /></div>}

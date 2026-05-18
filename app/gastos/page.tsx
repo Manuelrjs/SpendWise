@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { MENSAJE_ERROR_BUCKET_COMPROBANTES, normalizarNombreArchivo, validarComprobante } from '@/lib/comprobantes';
 import {
   calcularPeriodoTarjeta,
   CalendarioTarjeta,
@@ -57,6 +58,8 @@ type CuotaTarjeta = {
   motivo_modificacion?: string | null;
 };
 
+type Comprobante = { id: string; gasto_id: string; nombre_archivo: string | null; tipo_archivo: string; ruta_storage: string | null; url_storage: string | null; creado_en: string; };
+
 type Filtros = {
   busqueda: string;
   fecha_desde: string;
@@ -85,6 +88,7 @@ export default function Page() {
   const [gastoEditando, setGastoEditando] = useState<Gasto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mensajeExito, setMensajeExito] = useState<string | null>(null);
+  const [comprobantes, setComprobantes] = useState<Comprobante[]>([]);
 
   useEffect(() => { void cargarDatos(); }, []);
 
@@ -103,6 +107,11 @@ export default function Page() {
     return mapa;
   }, [tarjetasFisicas, nombresPersona]);
 
+  const comprobantesPorGasto = useMemo(() => comprobantes.reduce((acc, comprobante) => {
+    acc.set(comprobante.gasto_id, (acc.get(comprobante.gasto_id) ?? 0) + 1);
+    return acc;
+  }, new Map<string, number>()), [comprobantes]);
+
   const cuotasPorGasto = useMemo(() => cuotas.reduce((acc, cuota) => {
     if (!cuota.gasto_id) return acc;
     acc.set(cuota.gasto_id, (acc.get(cuota.gasto_id) ?? 0) + 1);
@@ -110,6 +119,7 @@ export default function Page() {
   }, new Map<string, number>()), [cuotas]);
 
   const cuotasGastoEditando = useMemo(() => gastoEditando ? cuotas.filter((c) => c.gasto_id === gastoEditando.id) : [], [cuotas, gastoEditando]);
+  const comprobantesGastoEditando = useMemo(() => gastoEditando ? comprobantes.filter((c) => c.gasto_id === gastoEditando.id) : [], [comprobantes, gastoEditando]);
   const gastoEditandoTieneCuotas = cuotasGastoEditando.length > 0;
 
   const gastosFiltrados = useMemo(() => gastos.filter((gasto) => {
@@ -142,7 +152,7 @@ export default function Page() {
   }, [gastoEditando, tarjetasFisicas, tarjetasEtiquetas]);
 
   async function cargarDatos() {
-    const [g, c, m, p, ct, tf, cuotasRes, cal] = await Promise.all([
+    const [g, c, m, p, ct, tf, cuotasRes, cal, comp] = await Promise.all([
       supabase.from('gastos').select('id,fecha_gasto,establecimiento,descripcion,observaciones,categoria_id,monto,moneda,medio_pago_id,persona_id,cuenta_tarjeta_id,tarjeta_fisica_id,cantidad_cuotas,estado_registro,creado_en').order('fecha_gasto', { ascending: false }),
       supabase.from('categorias').select('id,nombre').order('nombre'),
       supabase.from('medios_pago').select('id,nombre,tipo').order('nombre'),
@@ -150,10 +160,11 @@ export default function Page() {
       supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,dia_cierre_habitual,dias_hasta_vencimiento').order('nombre_cuenta'),
       supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,tipo,nombre_en_tarjeta,alias,ultimos_4_digitos,activo').order('id'),
       supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,motivo_modificacion'),
-      supabase.from('calendario_tarjetas').select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones')
+      supabase.from('calendario_tarjetas').select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones'),
+      supabase.from('comprobantes').select('id,gasto_id,nombre_archivo,tipo_archivo,ruta_storage,url_storage,creado_en').order('creado_en', { ascending: false })
     ]);
-    if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error || cal.error) return setError('No se pudieron cargar los datos de gastos.');
-    setGastos((g.data ?? []) as Gasto[]); setCategorias((c.data ?? []) as OpcionBase[]); setMediosPago((m.data ?? []) as OpcionBase[]); setPersonas((p.data ?? []) as Persona[]); setCuentasTarjeta((ct.data ?? []) as CuentaTarjeta[]); setTarjetasFisicas((tf.data ?? []) as TarjetaFisica[]); setCuotas((cuotasRes.data ?? []) as CuotaTarjeta[]); setCalendarios((cal.data ?? []) as CalendarioTarjeta[]);
+    if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error || cal.error || comp.error) return setError('No se pudieron cargar los datos de gastos.');
+    setGastos((g.data ?? []) as Gasto[]); setCategorias((c.data ?? []) as OpcionBase[]); setMediosPago((m.data ?? []) as OpcionBase[]); setPersonas((p.data ?? []) as Persona[]); setCuentasTarjeta((ct.data ?? []) as CuentaTarjeta[]); setTarjetasFisicas((tf.data ?? []) as TarjetaFisica[]); setCuotas((cuotasRes.data ?? []) as CuotaTarjeta[]); setCalendarios((cal.data ?? []) as CalendarioTarjeta[]); setComprobantes((comp.data ?? []) as Comprobante[]);
   }
 
 
@@ -275,6 +286,43 @@ export default function Page() {
     await cargarDatos();
   }
 
+
+  async function agregarComprobanteAGasto(gastoId: string, archivo: File | null) {
+    if (!archivo) return;
+    const validacion = validarComprobante(archivo);
+    if (!validacion.valido) return setError(validacion.mensaje);
+    try {
+      const fecha = new Date();
+      const anio = String(fecha.getFullYear());
+      const mes = String(fecha.getMonth() + 1).padStart(2, '0');
+      const nombreArchivo = normalizarNombreArchivo(archivo.name);
+      const rutaStorage = `${anio}/${mes}/${gastoId}/${nombreArchivo}`;
+      const { error: errorStorage } = await supabase.storage.from('comprobantes').upload(rutaStorage, archivo, { upsert: false, contentType: archivo.type });
+      if (errorStorage) {
+        console.error(errorStorage);
+        return setError(MENSAJE_ERROR_BUCKET_COMPROBANTES);
+      }
+      const { data: urlFirmada } = await supabase.storage.from('comprobantes').createSignedUrl(rutaStorage, 60 * 60 * 24 * 7);
+      const { error } = await supabase.from('comprobantes').insert({
+        gasto_id: gastoId,
+        tipo_comprobante: archivo.type === 'application/pdf' ? 'factura_pdf' : 'ticket_imagen',
+        tipo_archivo: archivo.type,
+        nombre_archivo: archivo.name,
+        ruta_storage: rutaStorage,
+        url_storage: urlFirmada?.signedUrl ?? null,
+        proveedor_almacenamiento: 'supabase',
+        estado_archivo: 'activo',
+        tamano_bytes: archivo.size,
+      });
+      if (error) throw error;
+      setMensajeExito('Comprobante agregado correctamente.');
+      await cargarDatos();
+    } catch (error) {
+      console.error(error);
+      setError('No se pudo agregar el comprobante.');
+    }
+  }
+
   async function anularGasto(gasto: Gasto) {
     await supabase.from('gastos').update({ estado_registro: 'anulado' }).eq('id', gasto.id);
     await supabase.from('cuotas_tarjeta').update({ estado: 'cancelada' }).eq('gasto_id', gasto.id).neq('estado', 'pagada');
@@ -305,7 +353,7 @@ export default function Page() {
       <div className="rounded-xl border bg-white p-3 text-sm">Total anulado: <strong>${totalAnulado.toFixed(2)}</strong></div>
     </div>
 
-    <div className="overflow-x-auto rounded-2xl border bg-white"><table className="min-w-full text-sm"><tbody>{gastosFiltrados.map((gasto) => <tr key={gasto.id} className={`border-t ${gasto.estado_registro === 'anulado' ? 'text-slate-400' : ''}`}><td className="px-2 py-2">{gasto.fecha_gasto}</td><td className="px-2">{gasto.establecimiento}</td><td className="px-2">{nombresCategoria.get(gasto.categoria_id)}</td><td className="px-2">{nombresPersona.get(gasto.persona_id)}</td><td className="px-2">{nombresMedioPago.get(gasto.medio_pago_id)}</td><td className="px-2">{cuotasPorGasto.get(gasto.id) ?? gasto.cantidad_cuotas}</td><td className="px-2">{gasto.estado_registro === 'anulado' ? <span className="rounded bg-rose-100 px-2 py-1 text-xs text-rose-700">Anulado</span> : null}</td><td className="px-2"><button onClick={() => setGastoEditando(gasto)} className="rounded border px-2 py-1">Editar</button>{gasto.estado_registro !== 'anulado' ? <button onClick={() => void anularGasto(gasto)} className="ml-2 rounded border border-rose-200 px-2 py-1 text-rose-700">Anular</button> : null}</td></tr>)}</tbody></table></div>
+    <div className="overflow-x-auto rounded-2xl border bg-white"><table className="min-w-full text-sm"><tbody>{gastosFiltrados.map((gasto) => <tr key={gasto.id} className={`border-t ${gasto.estado_registro === 'anulado' ? 'text-slate-400' : ''}`}><td className="px-2 py-2">{gasto.fecha_gasto}</td><td className="px-2">{gasto.establecimiento}</td><td className="px-2">{nombresCategoria.get(gasto.categoria_id)}</td><td className="px-2">{nombresPersona.get(gasto.persona_id)}</td><td className="px-2">{nombresMedioPago.get(gasto.medio_pago_id)}</td><td className="px-2">{cuotasPorGasto.get(gasto.id) ?? gasto.cantidad_cuotas}</td><td className="px-2">{(comprobantesPorGasto.get(gasto.id) ?? 0) > 0 ? <span className="rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700">Con comprobante</span> : <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">Sin comprobante</span>}</td><td className="px-2">{gasto.estado_registro === 'anulado' ? <span className="rounded bg-rose-100 px-2 py-1 text-xs text-rose-700">Anulado</span> : null}</td><td className="px-2"><button onClick={() => setGastoEditando(gasto)} className="rounded border px-2 py-1">Editar</button>{gasto.estado_registro !== 'anulado' ? <button onClick={() => void anularGasto(gasto)} className="ml-2 rounded border border-rose-200 px-2 py-1 text-rose-700">Anular</button> : null}</td></tr>)}</tbody></table></div>
 
     {gastoEditando && <form onSubmit={guardarEdicion} className="space-y-2 rounded-2xl border bg-white p-4">
       <h2 className="font-semibold">Editar gasto</h2>
@@ -331,6 +379,8 @@ export default function Page() {
       <label className="block text-sm font-medium">Observaciones<textarea value={gastoEditando.observaciones ?? ''} onChange={(e) => setGastoEditando((p) => p ? { ...p, observaciones: e.target.value } : null)} className="mt-1 w-full rounded-xl border px-3 py-2" /></label>
       {gastoEditandoTieneCuotas ? <p className="text-xs text-slate-500">Medio de pago, fecha y monto están bloqueados para mantener consistencia con cuotas generadas.</p> : null}
       <button className="rounded-xl bg-emerald-600 px-3 py-2 text-white">Guardar cambios</button>
+
+      <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Comprobantes</h3><p className="text-xs text-slate-600">Adjuntá imagen o PDF al gasto seleccionado.</p><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => void agregarComprobanteAGasto(gastoEditando.id, event.target.files?.[0] ?? null)} className="w-full rounded-xl border px-3 py-2 text-xs" />{comprobantesGastoEditando.length === 0 ? <p className="text-xs text-slate-500">Sin comprobantes asociados.</p> : comprobantesGastoEditando.map((comprobante) => <div key={comprobante.id} className="rounded-lg border p-2 text-xs"><p className="font-medium">{comprobante.nombre_archivo ?? 'Archivo sin nombre'}</p><p className="text-slate-500">{comprobante.tipo_archivo}</p>{comprobante.url_storage ? <a href={comprobante.url_storage} target="_blank" rel="noreferrer" className="text-emerald-700 underline">Abrir / descargar</a> : <p className="text-slate-500">Sin URL disponible.</p>}</div>)}</div>
 
       <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Cuotas asociadas</h3>
         {cuotasGastoEditando.map((cuota) => <div key={cuota.id} className="rounded-xl border p-2 text-sm">

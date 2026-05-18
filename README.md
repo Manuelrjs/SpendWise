@@ -97,3 +97,10 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 ## Validaciones manuales
 
 - Validación manual de cálculo de período de tarjeta: `node --experimental-strip-types scripts/probar-calculo-periodo.ts`.
+
+## Fase 1.5 — Comprobantes (Tarea 17)
+
+1. Ejecutar la migración `supabase/migrations/002_comprobantes.sql` en tu proyecto de Supabase.
+2. Verificar que exista el bucket de Storage llamado `comprobantes` (crear uno público o con políticas de lectura según tu entorno).
+3. En esta fase los comprobantes (imagen/PDF) se guardan en Supabase Storage y se registra su metadata en la tabla `comprobantes`.
+4. El archivado histórico hacia Google Drive queda pendiente para una fase posterior (no implementado en Fase 1.5).
