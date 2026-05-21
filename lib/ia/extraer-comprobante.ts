@@ -69,6 +69,8 @@ function mapearCategoria(sugerida: string | undefined, establecimiento: string |
 
   const sinonimosSupermercado = ['alimentos', 'supermercado', 'super', 'hipermercado', 'autoservicio', 'almacen', 'despensa', 'grocery', 'groceries', 'mayorista'];
   const sinonimosComida = ['restaurante', 'cafeteria', 'cafe', 'delivery', 'comida preparada', 'fast food', 'bar', 'rotiseria'];
+  const sinonimosImpuestos = ['impuesto', 'impuestos', 'tributo', 'tributos', 'tasa municipal', 'municipalidad', 'arca', 'afip', 'rentas', 'patente', 'inmobiliario'];
+  const categoriaImpuestos = categorias.find((cat) => normalizarTexto(cat.nombre) === 'impuestos');
 
   const pareceSupermercado = contieneAlguno(establecimientoNormalizado, ['super', 'hiper', 'market', 'almacen', 'autoservicio', 'mayorista']);
   const coincideSupermercado = contieneAlguno(normalizada, sinonimosSupermercado);
@@ -89,6 +91,23 @@ function mapearCategoria(sugerida: string | undefined, establecimiento: string |
       nombre: categoriaComida.nombre,
       detalle: `La IA sugirió "${sugerida}", pero se aplicó "${categoriaComida.nombre}" por coincidencia con restaurantes/comida preparada.`,
       noAplicada: undefined,
+    };
+  }
+
+  if (contieneAlguno(normalizada, sinonimosImpuestos)) {
+    if (categoriaImpuestos) {
+      return {
+        id: categoriaImpuestos.id,
+        nombre: categoriaImpuestos.nombre,
+        detalle: `La IA sugirió "${sugerida}", y se aplicó "${categoriaImpuestos.nombre}" por coincidencia con impuestos/tributos.`,
+        noAplicada: undefined,
+      };
+    }
+    return {
+      id: undefined,
+      nombre: 'Impuestos',
+      detalle: undefined,
+      noAplicada: 'Impuestos',
     };
   }
 
