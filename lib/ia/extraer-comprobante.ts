@@ -157,19 +157,27 @@ export async function extraerDatosComprobante(params: { file: File; categorias: 
   const advertencias = [...(resultado.advertencias ?? []), ...(sugerencias.advertencias ?? [])];
 
   let mapeoCategoria: ReturnType<typeof mapearCategoria> = { id: undefined, nombre: sugerencias.categoria_sugerida, detalle: undefined, noAplicada: undefined };
+  let falloMapeoCategoria = false;
   try {
     mapeoCategoria = mapearCategoria(sugerencias.categoria_sugerida, sugerencias.establecimiento, categorias);
   } catch (error) {
+    falloMapeoCategoria = true;
     console.error('Error en mapeo de categoría de comprobante:', error);
     advertencias.push('La categoría sugerida no se pudo mapear automáticamente.');
   }
 
   let mapeoMedio: ReturnType<typeof mapearMedioPago> = { id: undefined, nombre: sugerencias.medio_pago_sugerido, detalle: undefined, noAplicado: undefined };
+  let falloMapeoMedio = false;
   try {
     mapeoMedio = mapearMedioPago(sugerencias.medio_pago_sugerido, mediosPago);
   } catch (error) {
+    falloMapeoMedio = true;
     console.error('Error en mapeo de medio de pago de comprobante:', error);
     advertencias.push('El medio de pago sugerido no se pudo mapear automáticamente.');
+  }
+
+  if (falloMapeoCategoria || falloMapeoMedio) {
+    advertencias.push('No se pudo mapear automáticamente categoría o medio de pago.');
   }
 
   return {
