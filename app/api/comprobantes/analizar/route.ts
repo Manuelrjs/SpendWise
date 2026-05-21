@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { TAMANO_MAXIMO_COMPROBANTE_BYTES } from '@/lib/comprobantes';
 import { createClient } from '@/lib/supabase/server';
 
-const TIPOS_IMAGEN = ['image/jpeg', 'image/png', 'image/webp'];
+const TIPOS_IMAGEN = ['image/jpg', 'image/jpeg', 'image/png', 'image/webp'];
 const OPENAI_MODEL = 'gpt-4o-mini';
 const MENSAJE_ERROR_ANALISIS = 'No se pudo analizar el comprobante';
 
@@ -163,15 +163,25 @@ function extraerDetalleError(error: unknown): {
   };
 }
 
-function construirRespuestaError(detalle: ReturnType<typeof extraerDetalleError>) {
-  return {
+function construirRespuestaError(detalle: ReturnType<typeof extraerDetalleError>, fase: string) {
+  const base = {
     error: MENSAJE_ERROR_ANALISIS,
     detalle: detalle.mensaje,
+    fase,
+  };
+
+  if (process.env.NODE_ENV === 'production') {
+    return base;
+  }
+
+  return {
+    ...base,
     name: detalle.name,
     status: detalle.status,
     code: detalle.code,
     type: detalle.type,
     stack: detalle.stack,
+    data: detalle.data,
   };
 }
 
@@ -183,7 +193,7 @@ export async function POST(request: Request) {
     if (!(archivo instanceof File)) {
       const detalle = extraerDetalleError('No se recibió ningún archivo para analizar.');
       console.error('Error analizando comprobante:', detalle);
-      return NextResponse.json(construirRespuestaError(detalle), { status: 400 });
+      return NextResponse.json(construirRespuestaError(detalle, 'validacion'), { status: 400 });
     }
 
     if (archivo.type === 'application/pdf') {
@@ -199,19 +209,19 @@ export async function POST(request: Request) {
     if (!TIPOS_IMAGEN.includes(archivo.type)) {
       const detalle = extraerDetalleError('Formato no soportado para análisis automático.');
       console.error('Error analizando comprobante:', detalle);
-      return NextResponse.json(construirRespuestaError(detalle), { status: 400 });
+      return NextResponse.json(construirRespuestaError(detalle, 'validacion'), { status: 400 });
     }
 
     if (archivo.size > TAMANO_MAXIMO_COMPROBANTE_BYTES) {
       const detalle = extraerDetalleError('El archivo supera el tamaño máximo permitido.');
       console.error('Error analizando comprobante:', detalle);
-      return NextResponse.json(construirRespuestaError(detalle), { status: 400 });
+      return NextResponse.json(construirRespuestaError(detalle, 'validacion'), { status: 400 });
     }
 
     if (!process.env.OPENAI_API_KEY) {
       const detalle = extraerDetalleError('Falta OPENAI_API_KEY');
       console.error('Error analizando comprobante:', detalle);
-      return NextResponse.json(construirRespuestaError(detalle), { status: 500 });
+      return NextResponse.json(construirRespuestaError(detalle, 'validacion'), { status: 500 });
     }
 
     const bytes = await archivo.arrayBuffer();
@@ -298,13 +308,14 @@ Reglas:
         return NextResponse.json({
           error: MENSAJE_ERROR_ANALISIS,
           detalle: 'OpenAI no devolvió texto interpretable.',
+          fase: 'openai',
           respuesta_openai_resumida: resumenRespuesta,
         }, { status: 502 });
       }
 
       const detalle = extraerDetalleError('OpenAI no devolvió texto interpretable.');
       console.error('Error analizando comprobante:', detalle);
-      return NextResponse.json(construirRespuestaError(detalle), { status: 502 });
+      return NextResponse.json(construirRespuestaError(detalle, 'validacion'), { status: 502 });
     }
 
     const contenidoLimpio = limpiarJsonDeMarkdown(contenido);
@@ -320,9 +331,10 @@ Reglas:
         respuesta_cruda: contenido,
       });
       return NextResponse.json({
-        error: mensaje,
+        error: MENSAJE_ERROR_ANALISIS,
         detalle: detalle.mensaje,
-        texto_recibido: contenido,
+        fase: 'parseo_json',
+        texto_recibido: process.env.NODE_ENV === 'production' ? undefined : contenido,
       }, { status: 502 });
     }
 
@@ -341,7 +353,7 @@ Reglas:
     });
 
     return NextResponse.json(
-      construirRespuestaError(detalle),
+      construirRespuestaError(detalle, 'validacion'),
       { status: 502 },
     );
   }

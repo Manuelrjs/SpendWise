@@ -3,12 +3,12 @@ export type ItemMapeo = { id: string; nombre: string; tipo?: string | null };
 export type DatosComprobanteSugeridos = {
   fecha_gasto?: string;
   establecimiento?: string;
-  monto?: number;
+  monto?: number | null;
   moneda?: string;
   categoria_sugerida?: string;
-  categoria_id?: string;
+  categoria_id?: string | null;
   medio_pago_sugerido?: string;
-  medio_pago_id?: string;
+  medio_pago_id?: string | null;
   identificador_fiscal?: string;
   descripcion?: string;
   observaciones?: string;
@@ -137,26 +137,51 @@ export async function extraerDatosComprobante(params: { file: File; categorias: 
   body.append('archivo', file);
 
   const respuesta = await fetch('/api/comprobantes/analizar', { method: 'POST', body });
-  const resultado = (await respuesta.json()) as { sugerencias?: DatosComprobanteSugeridos; mensaje?: string; advertencias?: string[] };
+  const resultado = (await respuesta.json()) as {
+    sugerencias?: DatosComprobanteSugeridos;
+    mensaje?: string;
+    error?: string;
+    detalle?: string;
+    fase?: string;
+    advertencias?: string[];
+  };
 
   if (!respuesta.ok || !resultado.sugerencias) {
-    throw new Error(resultado.mensaje ?? 'No se pudo analizar el comprobante. Podés cargar el gasto manualmente.');
+    const mensajeBase = resultado.error ?? resultado.mensaje ?? 'No se pudo analizar el comprobante. Podés cargar el gasto manualmente.';
+    const detalle = resultado.detalle ? ` Detalle: ${resultado.detalle}.` : '';
+    const fase = resultado.fase ? ` Fase: ${resultado.fase}.` : '';
+    throw new Error(`${mensajeBase}${detalle}${fase}`.trim());
   }
 
   const sugerencias = resultado.sugerencias;
-  const mapeoCategoria = mapearCategoria(sugerencias.categoria_sugerida, sugerencias.establecimiento, categorias);
-  const mapeoMedio = mapearMedioPago(sugerencias.medio_pago_sugerido, mediosPago);
+  const advertencias = [...(resultado.advertencias ?? []), ...(sugerencias.advertencias ?? [])];
+
+  let mapeoCategoria: ReturnType<typeof mapearCategoria> = { id: undefined, nombre: sugerencias.categoria_sugerida, detalle: undefined, noAplicada: undefined };
+  try {
+    mapeoCategoria = mapearCategoria(sugerencias.categoria_sugerida, sugerencias.establecimiento, categorias);
+  } catch (error) {
+    console.error('Error en mapeo de categoría de comprobante:', error);
+    advertencias.push('La categoría sugerida no se pudo mapear automáticamente.');
+  }
+
+  let mapeoMedio: ReturnType<typeof mapearMedioPago> = { id: undefined, nombre: sugerencias.medio_pago_sugerido, detalle: undefined, noAplicado: undefined };
+  try {
+    mapeoMedio = mapearMedioPago(sugerencias.medio_pago_sugerido, mediosPago);
+  } catch (error) {
+    console.error('Error en mapeo de medio de pago de comprobante:', error);
+    advertencias.push('El medio de pago sugerido no se pudo mapear automáticamente.');
+  }
 
   return {
     ...sugerencias,
-    categoria_id: mapeoCategoria.id,
+    categoria_id: mapeoCategoria.id ?? null,
     categoria_sugerida: mapeoCategoria.nombre ?? sugerencias.categoria_sugerida,
-    medio_pago_id: mapeoMedio.id,
+    medio_pago_id: mapeoMedio.id ?? null,
     medio_pago_sugerido: mapeoMedio.nombre ?? sugerencias.medio_pago_sugerido,
     categoria_mapeo_detalle: mapeoCategoria.detalle,
     medio_pago_mapeo_detalle: mapeoMedio.detalle,
     categoria_no_aplicada: mapeoCategoria.noAplicada,
     medio_pago_no_aplicado: mapeoMedio.noAplicado,
-    advertencias: [...(resultado.advertencias ?? []), ...(sugerencias.advertencias ?? [])],
+    advertencias,
   };
 }
