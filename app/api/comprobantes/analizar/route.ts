@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { TAMANO_MAXIMO_COMPROBANTE_BYTES } from '@/lib/comprobantes';
-import { createClient } from '@/lib/supabase/server';
 
 const TIPOS_IMAGEN = ['image/jpg', 'image/jpeg', 'image/png', 'image/webp'];
 const OPENAI_MODEL = 'gpt-4o-mini';
@@ -227,15 +226,6 @@ export async function POST(request: Request) {
     const bytes = await archivo.arrayBuffer();
     const base64 = Buffer.from(bytes).toString('base64');
     const dataUrl = `data:${archivo.type};base64,${base64}`;
-    const supabase = await createClient();
-    const [categoriasRes, mediosRes] = await Promise.all([
-      supabase.from('categorias').select('nombre').eq('activo', true).order('orden'),
-      supabase.from('medios_pago').select('nombre').eq('activo', true).order('orden'),
-    ]);
-
-    const categoriasDisponibles = (categoriasRes.data ?? []).map((item) => item.nombre).filter(Boolean);
-    const mediosPagoDisponibles = (mediosRes.data ?? []).map((item) => item.nombre).filter(Boolean);
-
     const prompt = `Analizá la imagen de un comprobante (ticket/factura) y devolvé SOLO JSON válido (sin markdown).
 Campos obligatorios:
 {
@@ -258,15 +248,7 @@ Reglas:
 - Normalizar fecha a YYYY-MM-DD si es posible.
 - Normalizar moneda a ARS si parece comprobante argentino y no hay otra moneda clara.
 - No inventar datos.
-- Categorías disponibles actualmente: ${categoriasDisponibles.length ? categoriasDisponibles.join(', ') : 'No informadas'}.
-- Medios de pago disponibles actualmente: ${mediosPagoDisponibles.length ? mediosPagoDisponibles.join(', ') : 'No informados'}.
-- Usar preferentemente una categoría de la lista disponible si aplica razonablemente.
-- No inventar categorías si ya existe una categoría que aplica.
-- Para supermercado/almacén/autoservicio/hipermercado/mayorista, preferir "Supermercado" si existe.
-- Para restaurantes/cafeterías/delivery/bares/comida preparada, preferir "Comida" si existe.
-- Si ninguna categoría existente aplica, devolver categoria_sugerida como texto nuevo y no forzar categoría.
-- Usar preferentemente un medio de pago de la lista disponible si aplica razonablemente.
-- Si no hay coincidencia clara de medio de pago, devolver medio_pago_sugerido como texto libre sin forzar equivalencias.
+- Sugerir categoría y medio de pago como texto libre, sin depender de IDs o catálogos locales.
 - No forzar categoría o medio de pago con baja confianza.`;
 
     const respuestaOpenAI = await fetch('https://api.openai.com/v1/responses', {
