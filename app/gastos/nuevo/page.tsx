@@ -126,8 +126,11 @@ export default function Page() {
       });
       setSugerenciasIA(sugerencias);
     } catch (error) {
-      console.error(error);
-      setError('No se pudo analizar el comprobante. Podés cargar el gasto manualmente.');
+      console.error('Error analizando comprobante en /gastos/nuevo:', error);
+      const mensaje = error instanceof Error
+        ? error.message
+        : 'No se pudo analizar el comprobante. Podés cargar el gasto manualmente.';
+      setError(mensaje || 'No se pudo analizar el comprobante. Podés cargar el gasto manualmente.');
     } finally {
       setAnalizandoComprobante(false);
     }
