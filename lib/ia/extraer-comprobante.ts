@@ -18,7 +18,14 @@ export type DatosComprobanteSugeridos = {
   medio_pago_mapeo_detalle?: string;
   categoria_no_aplicada?: string;
   medio_pago_no_aplicado?: string;
+  categoria_generica?: boolean;
+  categoria_requiere_revision?: boolean;
+  categoria_detectada_como_impuesto?: boolean;
+  recomendacion_categoria_impuestos?: string;
 };
+
+const CATEGORIAS_GENERICAS = ['servicios', 'otros', 'general', 'compras', 'varios', 'alimentos'];
+const PALABRAS_IMPUESTOS = ['impuesto', 'impuestos', 'tributo', 'tributos', 'tasa', 'municipalidad', 'arca', 'afip', 'rentas', 'patente', 'inmobiliario', 'monotributo', 'ingresos brutos'];
 
 function normalizarTexto(valor: string) {
   return valor.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -69,7 +76,7 @@ function mapearCategoria(sugerida: string | undefined, establecimiento: string |
 
   const sinonimosSupermercado = ['alimentos', 'supermercado', 'super', 'hipermercado', 'autoservicio', 'almacen', 'despensa', 'grocery', 'groceries', 'mayorista'];
   const sinonimosComida = ['restaurante', 'cafeteria', 'cafe', 'delivery', 'comida preparada', 'fast food', 'bar', 'rotiseria'];
-  const sinonimosImpuestos = ['impuesto', 'impuestos', 'tributo', 'tributos', 'tasa municipal', 'municipalidad', 'arca', 'afip', 'rentas', 'patente', 'inmobiliario'];
+  const sinonimosImpuestos = PALABRAS_IMPUESTOS;
   const categoriaImpuestos = categorias.find((cat) => normalizarTexto(cat.nombre) === 'impuestos');
 
   const pareceSupermercado = contieneAlguno(establecimientoNormalizado, ['super', 'hiper', 'market', 'almacen', 'autoservicio', 'mayorista']);
@@ -106,7 +113,7 @@ function mapearCategoria(sugerida: string | undefined, establecimiento: string |
     return {
       id: undefined,
       nombre: 'Impuestos',
-      detalle: undefined,
+      detalle: 'No se aplicó categoría automáticamente porque no existe "Impuestos".',
       noAplicada: 'Impuestos',
     };
   }
@@ -120,6 +127,17 @@ function mapearCategoria(sugerida: string | undefined, establecimiento: string |
   }
 
   return { id: undefined, nombre: sugerida, detalle: undefined, noAplicada: sugerida };
+}
+
+function detectarComprobanteImpuestos(sugerencias: DatosComprobanteSugeridos) {
+  const texto = normalizarTexto([
+    sugerencias.categoria_sugerida,
+    sugerencias.establecimiento,
+    sugerencias.descripcion,
+    sugerencias.observaciones,
+  ].filter(Boolean).join(' '));
+  if (!texto) return false;
+  return contieneAlguno(texto, PALABRAS_IMPUESTOS);
 }
 
 function mapearMedioPago(sugerido: string | undefined, mediosPago: ItemMapeo[]) {
@@ -199,16 +217,37 @@ export async function extraerDatosComprobante(params: { file: File; categorias: 
     advertencias.push('No se pudo mapear automáticamente categoría o medio de pago.');
   }
 
+  const categoriaSugeridaFinal = mapeoCategoria.nombre ?? sugerencias.categoria_sugerida;
+  const categoriaNormalizada = normalizarTexto(categoriaSugeridaFinal ?? '');
+  const categoriaGenerica = CATEGORIAS_GENERICAS.includes(categoriaNormalizada);
+  const comprobantePareceImpuesto = detectarComprobanteImpuestos({ ...sugerencias, categoria_sugerida: categoriaSugeridaFinal });
+  const categoriaAplicadaEsServicios = categorias.some((cat) => cat.id === (mapeoCategoria.id ?? '') && normalizarTexto(cat.nombre) === 'servicios');
+  const categoriaRequiereRevision = categoriaGenerica || comprobantePareceImpuesto || categoriaAplicadaEsServicios;
+
+  if (categoriaGenerica) {
+    advertencias.push('La categoría sugerida puede ser genérica. Revisala antes de guardar.');
+  }
+
+  if (comprobantePareceImpuesto && !mapeoCategoria.id) {
+    advertencias.push('Este comprobante parece corresponder a impuestos. Podés crear la categoría Impuestos.');
+  }
+
   return {
     ...sugerencias,
     categoria_id: mapeoCategoria.id ?? null,
-    categoria_sugerida: mapeoCategoria.nombre ?? sugerencias.categoria_sugerida,
+    categoria_sugerida: categoriaSugeridaFinal,
     medio_pago_id: mapeoMedio.id ?? null,
     medio_pago_sugerido: mapeoMedio.nombre ?? sugerencias.medio_pago_sugerido,
     categoria_mapeo_detalle: mapeoCategoria.detalle,
     medio_pago_mapeo_detalle: mapeoMedio.detalle,
     categoria_no_aplicada: mapeoCategoria.noAplicada,
     medio_pago_no_aplicado: mapeoMedio.noAplicado,
+    categoria_generica: categoriaGenerica,
+    categoria_requiere_revision: categoriaRequiereRevision,
+    categoria_detectada_como_impuesto: comprobantePareceImpuesto,
+    recomendacion_categoria_impuestos: comprobantePareceImpuesto && !mapeoCategoria.id
+      ? 'Este comprobante parece corresponder a impuestos. Podés crear la categoría Impuestos.'
+      : undefined,
     advertencias,
   };
 }
