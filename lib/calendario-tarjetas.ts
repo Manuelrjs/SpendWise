@@ -18,6 +18,7 @@ export type CalendarioTarjetaDB = {
 
 type CuentaCalendario = {
   id: string;
+  nombre_cuenta?: string | null;
   dia_cierre_habitual: number | null;
   dias_hasta_vencimiento: number | null;
 };
@@ -113,7 +114,8 @@ export async function obtenerOCrearCalendarioEstimado(params: {
   if (encontrados.length === 1) return { calendario: encontrados[0], generado: false, consolidados: 0, pendientes: 0 };
 
   if (!cuenta.dia_cierre_habitual || cuenta.dias_hasta_vencimiento === null) {
-    throw new Error('Esta cuenta no tiene configuración habitual de cierre/vencimiento. Completala en Tarjetas o cargá el calendario manualmente.');
+    const nombreCuenta = cuenta.nombre_cuenta?.trim() || 'sin nombre';
+    throw new Error(`La cuenta ${nombreCuenta} no tiene configurado el día de cierre habitual o los días hasta vencimiento. Completalos en Tarjetas para que SpendWise pueda crear calendarios automáticamente.`);
   }
 
   const fecha_cierre = construirFechaCierreEstimada(periodo, cuenta.dia_cierre_habitual);
