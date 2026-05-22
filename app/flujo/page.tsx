@@ -129,6 +129,7 @@ function obtenerRangoCuotas(cuotas: CuotaTarjeta[]) {
   if (ordenadas.length === 0) return 'Sin cuotas';
   const primera = ordenadas[0];
   const ultima = ordenadas[ordenadas.length - 1];
+  if (primera.total_cuotas === 1 && ultima.total_cuotas === 1) return 'Pago único';
   if (primera.numero_cuota === ultima.numero_cuota) return `${primera.numero_cuota}/${primera.total_cuotas}`;
   return `${primera.numero_cuota}/${primera.total_cuotas} a ${ultima.numero_cuota}/${ultima.total_cuotas}`;
 }
