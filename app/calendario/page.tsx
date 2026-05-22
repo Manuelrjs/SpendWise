@@ -111,6 +111,12 @@ function estadoParaFormulario(estado: EstadoCalendario): EstadoCalendarioVisible
   return estado;
 }
 
+function origenLegible(origen: OrigenFecha) {
+  if (origen === 'resumen_banco') return 'resumen banco';
+  if (origen === 'importado') return 'resumen banco';
+  return origen;
+}
+
 export default function Page() {
   const [cuentas, setCuentas] = useState<CuentaTarjeta[]>([]);
   const [calendarios, setCalendarios] = useState<CalendarioTarjeta[]>([]);
@@ -473,9 +479,14 @@ export default function Page() {
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">
           <p className="font-semibold">¿Qué significan los estados?</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-4">
-            <li>Estimado: fecha calculada por la app usando el cierre habitual y los días hasta vencimiento.</li>
+            <li>Estimado: fecha calculada por la app o cargada como proyección mientras todavía no se conoce el resumen real.</li>
             <li>Confirmado: fecha revisada por el usuario contra el resumen real del banco.</li>
-            <li>Importado: fecha obtenida desde un archivo, resumen o integración.</li>
+          </ul>
+          <p className="mt-2 font-semibold">Origen</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            <li>Manual: cargado por el usuario.</li>
+            <li>Calculado: generado automáticamente por la app.</li>
+            <li>Resumen banco: reservado para importaciones futuras.</li>
           </ul>
         </div>
       </header>
@@ -509,56 +520,83 @@ export default function Page() {
           )}
         </div>
 
-        <form onSubmit={guardarCalendario} className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-6">
-          <select
-            value={formulario.cuenta_tarjeta_id}
-            onChange={(e) => setFormulario((prev) => ({ ...prev, cuenta_tarjeta_id: e.target.value }))}
-            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm xl:col-span-2"
-          >
-            <option value="">Cuenta de tarjeta *</option>
-            {cuentas.map((cuenta) => (
-              <option key={cuenta.id} value={cuenta.id}>
-                {descripcionCuenta(cuenta)}
-              </option>
-            ))}
-          </select>
+        <form onSubmit={guardarCalendario} className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <div className="xl:col-span-2">
+            <label htmlFor="cuenta-tarjeta" className="mb-1 block text-xs font-medium text-slate-700">Cuenta de tarjeta</label>
+            <select
+              id="cuenta-tarjeta"
+              value={formulario.cuenta_tarjeta_id}
+              onChange={(e) => setFormulario((prev) => ({ ...prev, cuenta_tarjeta_id: e.target.value }))}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+            >
+              <option value="">Seleccioná una cuenta *</option>
+              {cuentas.map((cuenta) => (
+                <option key={cuenta.id} value={cuenta.id}>
+                  {descripcionCuenta(cuenta)}
+                </option>
+              ))}
+            </select>
+          </div>
 
-          <input
-            value={formulario.periodo_resumen}
-            onChange={(e) => setFormulario((prev) => ({ ...prev, periodo_resumen: e.target.value }))}
-            placeholder="Período (YYYY-MM) *"
-            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-          />
-          <input
-            type="date"
-            value={formulario.fecha_cierre}
-            onChange={(e) => setFormulario((prev) => ({ ...prev, fecha_cierre: e.target.value }))}
-            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-          />
-          <input
-            type="date"
-            value={formulario.fecha_vencimiento}
-            onChange={(e) => setFormulario((prev) => ({ ...prev, fecha_vencimiento: e.target.value }))}
-            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-          />
-          <select
-            value={formulario.estado_calendario}
-            onChange={(e) => setFormulario((prev) => ({ ...prev, estado_calendario: e.target.value as EstadoCalendario }))}
-            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
-          >
-            {ESTADOS_VISIBLES.map((estado) => (
-              <option key={estado} value={estado}>
-                {estadoLegible(estado)}
-              </option>
-            ))}
-          </select>
-          <textarea
-            rows={1}
-            value={formulario.observaciones}
-            onChange={(e) => setFormulario((prev) => ({ ...prev, observaciones: e.target.value }))}
-            placeholder="Observaciones"
-            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm md:col-span-2 xl:col-span-4"
-          />
+          <div>
+            <label htmlFor="periodo-resumen" className="mb-1 block text-xs font-medium text-slate-700">Período de resumen</label>
+            <input
+              id="periodo-resumen"
+              value={formulario.periodo_resumen}
+              onChange={(e) => setFormulario((prev) => ({ ...prev, periodo_resumen: e.target.value }))}
+              placeholder="YYYY-MM"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-xs text-slate-500">Mes del resumen donde entran los gastos según la fecha de cierre. Ejemplo: 2026-05.</p>
+          </div>
+          <div>
+            <label htmlFor="fecha-cierre" className="mb-1 block text-xs font-medium text-slate-700">Fecha de cierre</label>
+            <input
+              id="fecha-cierre"
+              type="date"
+              value={formulario.fecha_cierre}
+              onChange={(e) => setFormulario((prev) => ({ ...prev, fecha_cierre: e.target.value }))}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-xs text-slate-500">Último día en que entran compras para este resumen.</p>
+          </div>
+          <div>
+            <label htmlFor="fecha-vencimiento" className="mb-1 block text-xs font-medium text-slate-700">Fecha de vencimiento</label>
+            <input
+              id="fecha-vencimiento"
+              type="date"
+              value={formulario.fecha_vencimiento}
+              onChange={(e) => setFormulario((prev) => ({ ...prev, fecha_vencimiento: e.target.value }))}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-xs text-slate-500">Fecha estimada o confirmada en que se paga el resumen.</p>
+          </div>
+          <div>
+            <label htmlFor="estado-calendario" className="mb-1 block text-xs font-medium text-slate-700">Estado</label>
+            <select
+              id="estado-calendario"
+              value={formulario.estado_calendario}
+              onChange={(e) => setFormulario((prev) => ({ ...prev, estado_calendario: e.target.value as EstadoCalendario }))}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+            >
+              {ESTADOS_VISIBLES.map((estado) => (
+                <option key={estado} value={estado}>
+                  {estadoLegible(estado)}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-slate-500">Usá estimado mientras no tengas el resumen real. Cambialo a confirmado cuando revises las fechas del banco.</p>
+          </div>
+          <div className="md:col-span-2 xl:col-span-4">
+            <label htmlFor="observaciones" className="mb-1 block text-xs font-medium text-slate-700">Observaciones</label>
+            <textarea
+              id="observaciones"
+              rows={1}
+              value={formulario.observaciones}
+              onChange={(e) => setFormulario((prev) => ({ ...prev, observaciones: e.target.value }))}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
           <button
             type="submit"
             disabled={guardando}
@@ -674,7 +712,7 @@ export default function Page() {
                           <span className="ml-1 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-700">Con cuotas</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-slate-700">{item.origen_fecha}</td>
+                      <td className="px-3 py-2 text-slate-700">{origenLegible(item.origen_fecha)}</td>
                       <td className="px-3 py-2 text-slate-700">{item.observaciones || '-'}</td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex justify-end gap-1">
@@ -720,7 +758,7 @@ export default function Page() {
                   <div className="space-y-1 text-xs text-slate-600">
                     <p><span className="font-medium text-slate-700">Cierre:</span> {item.fecha_cierre}</p>
                     <p><span className="font-medium text-slate-700">Vencimiento:</span> {item.fecha_vencimiento}</p>
-                    <p><span className="font-medium text-slate-700">Origen:</span> {item.origen_fecha}</p>
+                    <p><span className="font-medium text-slate-700">Origen:</span> {origenLegible(item.origen_fecha)}</p>
                     <p><span className="font-medium text-slate-700">Observaciones:</span> {item.observaciones || '-'}</p>
                   </div>
                   <div className="mt-3 flex gap-2">
