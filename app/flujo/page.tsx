@@ -694,6 +694,7 @@ function DetalleCuotasLista({
   nombresPersonas: Map<string, string>;
   nombresTarjetas: Map<string, string>;
 }) {
+  const etiquetaCuota = (numeroCuota: number, totalCuotas: number) => (totalCuotas === 1 ? 'Pago único' : `${numeroCuota}/${totalCuotas}`);
   return (
     <div className="space-y-2">
       {cuotas.map((cuota) => (
@@ -702,7 +703,7 @@ function DetalleCuotasLista({
             <p className="font-medium">{cuota.establecimiento}</p>
             <p className="text-right font-semibold tabular-nums">{formatearMonto(cuota.monto_cuota, cuota.moneda)}</p>
           </div>
-          <p className="text-sm text-slate-600">{cuota.descripcion_cuota ?? 'Sin descripción'} · {cuota.numero_cuota}/{cuota.total_cuotas}</p>
+          <p className="text-sm text-slate-600">{cuota.descripcion_cuota ?? 'Sin descripción'} · {etiquetaCuota(cuota.numero_cuota, cuota.total_cuotas)}</p>
           <p className="text-sm text-slate-600">Persona: {cuota.persona_id ? nombresPersonas.get(cuota.persona_id) ?? 'Sin persona' : 'Sin persona'} · Tarjeta: {cuota.tarjeta_fisica_id ? nombresTarjetas.get(cuota.tarjeta_fisica_id) ?? 'Sin tarjeta' : 'Sin tarjeta'}</p>
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
             <span className={`rounded-full border px-2 py-1 ${BADGE_ORIGEN[cuota.origen_cuota] ?? 'bg-slate-50 text-slate-700 border-slate-200'}`}>origen: {cuota.origen_cuota}</span>
