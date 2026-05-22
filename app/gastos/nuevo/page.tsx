@@ -301,7 +301,7 @@ export default function Page() {
           const periodoResumenCuota = i === 0 ? resultado.periodo_resumen : sumarMesesPeriodo(resultado.periodo_resumen, i);
           const calCuota = await asegurarCalendario(cuenta, periodoResumenCuota);
           usaronEstimados ||= calCuota.generado || calCuota.calendario.estado_calendario === 'estimado';
-          const periodoPago = i === 0 ? resultado.periodo_pago : sumarMesesPeriodo(resultado.periodo_pago, i);
+          const periodoPago = i === 0 ? resultado.periodo_pago : formatearPeriodoDesdeFecha(calCuota.calendario.fecha_vencimiento);
           cuotasPayload.push({
             cuenta_tarjeta_id: cuenta.id,
             tarjeta_fisica_id: formulario.tarjeta_fisica_id,
