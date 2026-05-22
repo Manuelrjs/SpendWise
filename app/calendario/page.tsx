@@ -15,7 +15,7 @@ type CuentaTarjeta = {
 };
 
 type EstadoCalendario = 'estimado' | 'confirmado' | 'importado' | 'modificado_manual';
-type EstadoCalendarioVisible = 'estimado' | 'confirmado' | 'importado';
+type EstadoCalendarioVisible = 'estimado' | 'confirmado';
 type OrigenFecha = 'manual' | 'calculado' | 'importado' | 'resumen_banco';
 
 type CalendarioTarjeta = {
@@ -37,7 +37,6 @@ type FormularioCalendario = {
   fecha_cierre: string;
   fecha_vencimiento: string;
   estado_calendario: EstadoCalendario;
-  origen_fecha: OrigenFecha;
   observaciones: string;
 };
 
@@ -46,8 +45,7 @@ type FormularioGeneracion = {
   cantidad_meses: string;
 };
 
-const ESTADOS_VISIBLES: EstadoCalendarioVisible[] = ['estimado', 'confirmado', 'importado'];
-const ORIGENES: OrigenFecha[] = ['manual', 'calculado', 'importado', 'resumen_banco'];
+const ESTADOS_VISIBLES: EstadoCalendarioVisible[] = ['estimado', 'confirmado'];
 
 const estadoInicialFormulario: FormularioCalendario = {
   cuenta_tarjeta_id: '',
@@ -55,7 +53,6 @@ const estadoInicialFormulario: FormularioCalendario = {
   fecha_cierre: '',
   fecha_vencimiento: '',
   estado_calendario: 'estimado',
-  origen_fecha: 'manual',
   observaciones: '',
 };
 
@@ -96,6 +93,7 @@ function estadoLegible(estado: EstadoCalendario) {
 }
 
 function estadoParaFormulario(estado: EstadoCalendario): EstadoCalendarioVisible {
+  if (estado === 'importado') return 'confirmado';
   if (estado === 'modificado_manual') return 'confirmado';
   return estado;
 }
@@ -208,7 +206,6 @@ export default function Page() {
       fecha_cierre: item.fecha_cierre,
       fecha_vencimiento: item.fecha_vencimiento,
       estado_calendario: estadoParaFormulario(item.estado_calendario),
-      origen_fecha: item.origen_fecha,
       observaciones: item.observaciones ?? '',
     });
     setErrorFormulario('');
@@ -258,16 +255,16 @@ export default function Page() {
     }
 
     setGuardando(true);
-    const payload = {
+    const payloadBase = {
       cuenta_tarjeta_id: formulario.cuenta_tarjeta_id,
       periodo_resumen: periodoNormalizado,
       fecha_cierre: formulario.fecha_cierre,
       fecha_vencimiento: formulario.fecha_vencimiento,
       estado_calendario: formulario.estado_calendario,
-      origen_fecha: formulario.origen_fecha,
       observaciones: formulario.observaciones.trim() || null,
       actualizado_en: new Date().toISOString(),
     };
+    const payload = calendarioEditandoId ? payloadBase : { ...payloadBase, origen_fecha: 'manual' as OrigenFecha };
 
     const respuesta = calendarioEditandoId
       ? await supabase.from('calendario_tarjetas').update(payload).eq('id', calendarioEditandoId)
@@ -501,18 +498,6 @@ export default function Page() {
               </option>
             ))}
           </select>
-          <select
-            value={formulario.origen_fecha}
-            onChange={(e) => setFormulario((prev) => ({ ...prev, origen_fecha: e.target.value as OrigenFecha }))}
-            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
-          >
-            {ORIGENES.map((origen) => (
-              <option key={origen} value={origen}>
-                {origen}
-              </option>
-            ))}
-          </select>
-
           <textarea
             rows={1}
             value={formulario.observaciones}

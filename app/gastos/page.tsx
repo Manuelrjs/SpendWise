@@ -100,6 +100,10 @@ function crearNombreComprobantePegado() {
   return `comprobante-pegado-${yyyy}-${mm}-${dd}-${hh}${min}.png`;
 }
 
+function etiquetaCuota(numeroCuota: number, totalCuotas: number) {
+  return totalCuotas === 1 ? 'Pago único' : `${numeroCuota}/${totalCuotas}`;
+}
+
 
 export default function Page() {
   const [gastos, setGastos] = useState<Gasto[]>([]);
@@ -148,9 +152,11 @@ export default function Page() {
 
   const cuotasPorGasto = useMemo(() => cuotas.reduce((acc, cuota) => {
     if (!cuota.gasto_id) return acc;
-    acc.set(cuota.gasto_id, (acc.get(cuota.gasto_id) ?? 0) + 1);
+    const lista = acc.get(cuota.gasto_id) ?? [];
+    lista.push(cuota);
+    acc.set(cuota.gasto_id, lista);
     return acc;
-  }, new Map<string, number>()), [cuotas]);
+  }, new Map<string, CuotaTarjeta[]>()), [cuotas]);
 
   const cuotasGastoEditando = useMemo(() => gastoEditando ? cuotas.filter((c) => c.gasto_id === gastoEditando.id) : [], [cuotas, gastoEditando]);
   const comprobantesGastoEditando = useMemo(() => gastoEditando ? comprobantes.filter((c) => c.gasto_id === gastoEditando.id) : [], [comprobantes, gastoEditando]);
@@ -450,7 +456,15 @@ export default function Page() {
       <div className="rounded-xl border bg-white p-3 text-sm">Total anulado: <strong>${totalAnulado.toFixed(2)}</strong></div>
     </div>
 
-    <div className="overflow-x-auto rounded-2xl border bg-white"><table className="min-w-full text-sm"><tbody>{gastosFiltrados.map((gasto) => <tr key={gasto.id} className={`border-t ${gasto.estado_registro === 'anulado' ? 'text-slate-400' : ''}`}><td className="px-2 py-2">{gasto.fecha_gasto}</td><td className="px-2">{gasto.establecimiento}</td><td className="px-2">{nombresCategoria.get(gasto.categoria_id)}</td><td className="px-2">{nombresPersona.get(gasto.persona_id)}</td><td className="px-2">{nombresMedioPago.get(gasto.medio_pago_id)}</td><td className="px-2">{cuotasPorGasto.get(gasto.id) ?? (esMedioTarjetaCredito(gasto.medio_pago_id) ? "Tarjeta sin compromiso" : gasto.cantidad_cuotas)}</td><td className="px-2">{(comprobantesPorGasto.get(gasto.id) ?? 0) > 0 ? <button type="button" onClick={() => { setGastoPreviewId(gasto.id); setIndicePreview(0); setComprobantePreviewAbierto(true); }} className="cursor-pointer rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700 transition hover:bg-emerald-200">Con comprobante</button> : <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">Sin comprobante</span>}</td><td className="px-2">{gasto.estado_registro === 'anulado' ? <span className="rounded bg-rose-100 px-2 py-1 text-xs text-rose-700">Anulado</span> : null}</td><td className="px-2"><button onClick={() => setGastoEditando(gasto)} className="rounded border px-2 py-1">Editar</button>{gasto.estado_registro !== 'anulado' ? <button onClick={() => void anularGasto(gasto)} className="ml-2 rounded border border-rose-200 px-2 py-1 text-rose-700">Anular</button> : null}</td></tr>)}</tbody></table></div>
+    <div className="overflow-x-auto rounded-2xl border bg-white"><table className="min-w-full text-sm"><tbody>{gastosFiltrados.map((gasto) => {
+      const cuotasDelGasto = cuotasPorGasto.get(gasto.id) ?? [];
+      const resumenCuotas = cuotasDelGasto.length > 0
+        ? (cuotasDelGasto.length === 1
+          ? etiquetaCuota(cuotasDelGasto[0].numero_cuota, cuotasDelGasto[0].total_cuotas)
+          : `${etiquetaCuota(cuotasDelGasto[0].numero_cuota, cuotasDelGasto[0].total_cuotas)} · +${cuotasDelGasto.length - 1}`)
+        : (esMedioTarjetaCredito(gasto.medio_pago_id) ? 'Tarjeta sin compromiso' : String(gasto.cantidad_cuotas));
+      return <tr key={gasto.id} className={`border-t ${gasto.estado_registro === 'anulado' ? 'text-slate-400' : ''}`}><td className="px-2 py-2">{gasto.fecha_gasto}</td><td className="px-2">{gasto.establecimiento}</td><td className="px-2">{nombresCategoria.get(gasto.categoria_id)}</td><td className="px-2">{nombresPersona.get(gasto.persona_id)}</td><td className="px-2">{nombresMedioPago.get(gasto.medio_pago_id)}</td><td className="px-2">{resumenCuotas}</td><td className="px-2">{(comprobantesPorGasto.get(gasto.id) ?? 0) > 0 ? <button type="button" onClick={() => { setGastoPreviewId(gasto.id); setIndicePreview(0); setComprobantePreviewAbierto(true); }} className="cursor-pointer rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700 transition hover:bg-emerald-200">Con comprobante</button> : <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">Sin comprobante</span>}</td><td className="px-2">{gasto.estado_registro === 'anulado' ? <span className="rounded bg-rose-100 px-2 py-1 text-xs text-rose-700">Anulado</span> : null}</td><td className="px-2"><button onClick={() => setGastoEditando(gasto)} className="rounded border px-2 py-1">Editar</button>{gasto.estado_registro !== 'anulado' ? <button onClick={() => void anularGasto(gasto)} className="ml-2 rounded border border-rose-200 px-2 py-1 text-rose-700">Anular</button> : null}</td></tr>;
+    })}</tbody></table></div>
 
     {comprobantePreviewAbierto ? <div className="fixed inset-0 z-50 flex items-end bg-slate-900/60 p-0 sm:items-center sm:justify-center sm:p-4">
       <div className="w-full rounded-t-2xl bg-white p-4 sm:max-w-3xl sm:rounded-2xl">
