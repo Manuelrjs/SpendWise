@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { consolidarDuplicadosCalendario, obtenerOCrearCalendarioEstimado } from '@/lib/calendario-tarjetas';
 
 type CuentaTarjeta = {
   id: string;
@@ -72,10 +73,6 @@ function descripcionCuenta(cuenta: CuentaTarjeta) {
   return bancoMarca ? `${cuenta.nombre_cuenta} (${bancoMarca})` : cuenta.nombre_cuenta;
 }
 
-function obtenerUltimoDiaDelMes(anio: number, mesIndex: number) {
-  return new Date(Date.UTC(anio, mesIndex + 1, 0)).getUTCDate();
-}
-
 function generarPeriodo(anio: number, mesIndex: number) {
   const mes = (mesIndex + 1).toString().padStart(2, '0');
   return `${anio}-${mes}`;
@@ -127,6 +124,7 @@ export default function Page() {
     () => calendarios.filter((item) => item.cuenta_tarjeta_id === cuentaSeleccionadaId),
     [calendarios, cuentaSeleccionadaId],
   );
+  const hayDuplicadosVisibles = useMemo(() => calendariosCuenta.some((item) => esDuplicado(item)), [calendariosCuenta, calendarios]);
 
   async function cargarDatos() {
     setCargando(true);
@@ -187,6 +185,11 @@ export default function Page() {
     void cargarDatos();
   }, []);
 
+  useEffect(() => {
+    if (!cuentaSeleccionadaId) return;
+    void resolverDuplicadosCuenta(cuentaSeleccionadaId, false);
+  }, [cuentaSeleccionadaId]);
+
   function limpiarFormulario() {
     setCalendarioEditandoId(null);
     setErrorFormulario('');
@@ -239,7 +242,14 @@ export default function Page() {
         item.periodo_resumen === periodoNormalizado &&
         item.id !== calendarioEditandoId,
     );
-    if (yaExiste) {
+    const cambioClave = calendarioEditandoId
+      ? (() => {
+          const original = calendarios.find((item) => item.id === calendarioEditandoId);
+          if (!original) return true;
+          return original.cuenta_tarjeta_id !== formulario.cuenta_tarjeta_id || original.periodo_resumen !== periodoNormalizado;
+        })()
+      : true;
+    if (yaExiste && cambioClave) {
       return setErrorFormulario(
         calendarioEditandoId
           ? 'Ya existe otro calendario para esta cuenta y período.'
@@ -298,7 +308,6 @@ export default function Page() {
       return setErrorGeneracion('La cuenta no tiene un día de cierre habitual válido.');
     }
 
-    const diasVencimiento = cuenta.dias_hasta_vencimiento ?? 0;
     const [anioInicial, mesInicial] = formGeneracion.mes_inicial.split('-').map(Number);
     const existentes = new Set(
       calendarios
@@ -306,7 +315,7 @@ export default function Page() {
         .map((item) => item.periodo_resumen),
     );
 
-    const nuevosRegistros: Array<Omit<CalendarioTarjeta, 'id' | 'creado_en' | 'actualizado_en'>> = [];
+    let generados = 0;
     let omitidos = 0;
 
     for (let i = 0; i < cantidad; i += 1) {
@@ -317,36 +326,15 @@ export default function Page() {
         continue;
       }
 
-      const ultimoDia = obtenerUltimoDiaDelMes(anio, mesIndex);
-      const diaCierre = Math.min(cuenta.dia_cierre_habitual, ultimoDia);
-      const fechaCierre = new Date(Date.UTC(anio, mesIndex, diaCierre));
-      const fechaVencimiento = new Date(fechaCierre);
-      fechaVencimiento.setUTCDate(fechaVencimiento.getUTCDate() + diasVencimiento);
-
-      nuevosRegistros.push({
-        cuenta_tarjeta_id: cuentaSeleccionadaId,
-        periodo_resumen: periodo,
-        fecha_cierre: fechaCierre.toISOString().slice(0, 10),
-        fecha_vencimiento: fechaVencimiento.toISOString().slice(0, 10),
-        estado_calendario: 'estimado',
-        origen_fecha: 'calculado',
-        observaciones: null,
-      });
+      const resultado = await obtenerOCrearCalendarioEstimado({ supabase, cuenta, periodo, contexto: 'calendario' });
+      if (resultado.generado) generados += 1;
+      else omitidos += 1;
     }
 
     setGenerando(true);
-    const { error } =
-      nuevosRegistros.length > 0 ? await supabase.from('calendario_tarjetas').insert(nuevosRegistros) : { error: null };
-
-    if (error) {
-      setMensaje({ tipo: 'error', texto: 'No se pudieron generar los períodos futuros.' });
-      setGenerando(false);
-      return;
-    }
-
     setMensaje({
       tipo: 'ok',
-      texto: `Se generaron ${nuevosRegistros.length} períodos. Se omitieron ${omitidos} períodos porque ya existían.`,
+      texto: `Se generaron ${generados} períodos. Se omitieron ${omitidos} períodos porque ya existían.`,
     });
     setGenerando(false);
     await cargarDatos();
@@ -374,13 +362,21 @@ export default function Page() {
     const confirmacion = window.confirm('¿Querés eliminar este período de calendario?');
     if (!confirmacion) return;
 
-    if (tieneCuotasAsociadas(item)) {
+    const esItemDuplicado = esDuplicado(item);
+    if (tieneCuotasAsociadas(item) && !esItemDuplicado) {
       setMensaje({
         tipo: 'error',
         texto:
           'No se puede eliminar este período porque tiene cuotas asociadas. Podés editar las fechas cuando tengas el cierre/vencimiento confirmado.',
       });
       return;
+    }
+    if (esItemDuplicado) {
+      const cantidadMismoPeriodo = calendarios.filter((otro) => otro.cuenta_tarjeta_id === item.cuenta_tarjeta_id && otro.periodo_resumen === item.periodo_resumen).length;
+      if (cantidadMismoPeriodo <= 1 && tieneCuotasAsociadas(item)) {
+        setMensaje({ tipo: 'error', texto: 'No se puede eliminar este período porque tiene cuotas asociadas.' });
+        return;
+      }
     }
 
     const { error } = await supabase.from('calendario_tarjetas').delete().eq('id', item.id);
@@ -392,6 +388,27 @@ export default function Page() {
     if (calendarioEditandoId === item.id) limpiarFormulario();
     setMensaje({ tipo: 'ok', texto: 'Período eliminado correctamente.' });
     await cargarDatos();
+  }
+
+  async function resolverDuplicadosCuenta(cuentaId: string, mostrarMensaje: boolean) {
+    const grupos = new Map<string, CalendarioTarjeta[]>();
+    calendarios.filter((item) => item.cuenta_tarjeta_id === cuentaId).forEach((item) => {
+      const clave = `${item.cuenta_tarjeta_id}::${item.periodo_resumen}`;
+      const lista = grupos.get(clave) ?? [];
+      lista.push(item);
+      grupos.set(clave, lista);
+    });
+    let eliminados = 0;
+    let pendientes = 0;
+    for (const duplicados of grupos.values()) {
+      if (duplicados.length < 2) continue;
+      const resultado = await consolidarDuplicadosCalendario(supabase, duplicados);
+      eliminados += resultado.eliminados;
+      if (resultado.pendiente) pendientes += 1;
+    }
+    if (eliminados > 0 || pendientes > 0) await cargarDatos();
+    if (mostrarMensaje && eliminados > 0) setMensaje({ tipo: 'ok', texto: 'Duplicados resueltos. Se conservó un calendario principal para cada período.' });
+    if (!mostrarMensaje && eliminados > 0) setMensaje({ tipo: 'ok', texto: 'Se corrigieron períodos duplicados automáticamente.' });
   }
 
   return (
@@ -547,7 +564,18 @@ export default function Page() {
       </div>
 
       <div className="space-y-3">
-        <h2 className="text-lg font-semibold">Calendario por cuenta</h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">Calendario por cuenta</h2>
+          {hayDuplicadosVisibles && (
+            <button
+              type="button"
+              onClick={() => void resolverDuplicadosCuenta(cuentaSeleccionadaId, true)}
+              className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700"
+            >
+              Resolver duplicados
+            </button>
+          )}
+        </div>
 
         {cargando ? (
           <p className="text-sm text-slate-600">Cargando calendario...</p>
