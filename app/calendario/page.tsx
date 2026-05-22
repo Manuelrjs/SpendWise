@@ -14,6 +14,7 @@ type CuentaTarjeta = {
 };
 
 type EstadoCalendario = 'estimado' | 'confirmado' | 'importado' | 'modificado_manual';
+type EstadoCalendarioVisible = 'estimado' | 'confirmado' | 'importado';
 type OrigenFecha = 'manual' | 'calculado' | 'importado' | 'resumen_banco';
 
 type CalendarioTarjeta = {
@@ -44,7 +45,7 @@ type FormularioGeneracion = {
   cantidad_meses: string;
 };
 
-const ESTADOS: EstadoCalendario[] = ['estimado', 'confirmado', 'importado', 'modificado_manual'];
+const ESTADOS_VISIBLES: EstadoCalendarioVisible[] = ['estimado', 'confirmado', 'importado'];
 const ORIGENES: OrigenFecha[] = ['manual', 'calculado', 'importado', 'resumen_banco'];
 
 const estadoInicialFormulario: FormularioCalendario = {
@@ -93,7 +94,12 @@ function colorBadgeEstado(estado: EstadoCalendario) {
 }
 
 function estadoLegible(estado: EstadoCalendario) {
-  if (estado === 'modificado_manual') return 'modificado manual';
+  if (estado === 'modificado_manual') return 'confirmado';
+  return estado;
+}
+
+function estadoParaFormulario(estado: EstadoCalendario): EstadoCalendarioVisible {
+  if (estado === 'modificado_manual') return 'confirmado';
   return estado;
 }
 
@@ -110,6 +116,7 @@ export default function Page() {
   const [errorFormulario, setErrorFormulario] = useState('');
   const [errorGeneracion, setErrorGeneracion] = useState('');
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
+  const [periodosConCuotas, setPeriodosConCuotas] = useState<Set<string>>(new Set());
 
   const tituloFormulario = useMemo(
     () => (calendarioEditandoId ? 'Editar período de calendario' : 'Nuevo período de calendario'),
@@ -125,7 +132,11 @@ export default function Page() {
     setCargando(true);
     setMensaje(null);
 
-    const [{ data: dataCuentas, error: errorCuentas }, { data: dataCalendarios, error: errorCalendarios }] =
+    const [
+      { data: dataCuentas, error: errorCuentas },
+      { data: dataCalendarios, error: errorCalendarios },
+      { data: dataCuotas, error: errorCuotas },
+    ] =
       await Promise.all([
         supabase
           .from('cuentas_tarjeta')
@@ -137,9 +148,10 @@ export default function Page() {
             'id, cuenta_tarjeta_id, periodo_resumen, fecha_cierre, fecha_vencimiento, estado_calendario, origen_fecha, observaciones, creado_en, actualizado_en',
           )
           .order('periodo_resumen', { ascending: false }),
+        supabase.from('cuotas_tarjeta').select('cuenta_tarjeta_id, periodo_pago_estimado').neq('estado', 'cancelada'),
       ]);
 
-    if (errorCuentas || errorCalendarios) {
+    if (errorCuentas || errorCalendarios || errorCuotas) {
       setMensaje({ tipo: 'error', texto: 'No se pudo cargar el calendario de tarjetas.' });
       setCargando(false);
       return;
@@ -147,9 +159,16 @@ export default function Page() {
 
     const cuentasCargadas = (dataCuentas ?? []) as CuentaTarjeta[];
     const calendariosCargados = (dataCalendarios ?? []) as CalendarioTarjeta[];
+    const cuotas = (dataCuotas ?? []) as Array<{ cuenta_tarjeta_id: string; periodo_pago_estimado: string }>;
+    const clavesConCuotas = new Set(
+      cuotas
+        .filter((item) => item.cuenta_tarjeta_id && item.periodo_pago_estimado)
+        .map((item) => `${item.cuenta_tarjeta_id}::${item.periodo_pago_estimado}`),
+    );
 
     setCuentas(cuentasCargadas);
     setCalendarios(calendariosCargados);
+    setPeriodosConCuotas(clavesConCuotas);
 
     setCuentaSeleccionadaId((actual) => {
       if (actual && cuentasCargadas.some((c) => c.id === actual)) return actual;
@@ -185,7 +204,7 @@ export default function Page() {
       periodo_resumen: item.periodo_resumen,
       fecha_cierre: item.fecha_cierre,
       fecha_vencimiento: item.fecha_vencimiento,
-      estado_calendario: item.estado_calendario,
+      estado_calendario: estadoParaFormulario(item.estado_calendario),
       origen_fecha: item.origen_fecha,
       observaciones: item.observaciones ?? '',
     });
@@ -220,7 +239,13 @@ export default function Page() {
         item.periodo_resumen === periodoNormalizado &&
         item.id !== calendarioEditandoId,
     );
-    if (yaExiste) return setErrorFormulario('Ya existe ese período para la cuenta seleccionada.');
+    if (yaExiste) {
+      return setErrorFormulario(
+        calendarioEditandoId
+          ? 'Ya existe otro calendario para esta cuenta y período.'
+          : 'Ya existe un calendario para esta cuenta y período.',
+      );
+    }
 
     setGuardando(true);
     const payload = {
@@ -282,11 +307,15 @@ export default function Page() {
     );
 
     const nuevosRegistros: Array<Omit<CalendarioTarjeta, 'id' | 'creado_en' | 'actualizado_en'>> = [];
+    let omitidos = 0;
 
     for (let i = 0; i < cantidad; i += 1) {
       const { anio, mesIndex } = sumarMeses(anioInicial, mesInicial - 1, i);
       const periodo = generarPeriodo(anio, mesIndex);
-      if (existentes.has(periodo)) continue;
+      if (existentes.has(periodo)) {
+        omitidos += 1;
+        continue;
+      }
 
       const ultimoDia = obtenerUltimoDiaDelMes(anio, mesIndex);
       const diaCierre = Math.min(cuenta.dia_cierre_habitual, ultimoDia);
@@ -305,12 +334,9 @@ export default function Page() {
       });
     }
 
-    if (nuevosRegistros.length === 0) {
-      return setErrorGeneracion('No hay períodos nuevos para crear (ya existen todos).');
-    }
-
     setGenerando(true);
-    const { error } = await supabase.from('calendario_tarjetas').insert(nuevosRegistros);
+    const { error } =
+      nuevosRegistros.length > 0 ? await supabase.from('calendario_tarjetas').insert(nuevosRegistros) : { error: null };
 
     if (error) {
       setMensaje({ tipo: 'error', texto: 'No se pudieron generar los períodos futuros.' });
@@ -318,8 +344,53 @@ export default function Page() {
       return;
     }
 
-    setMensaje({ tipo: 'ok', texto: `Se generaron ${nuevosRegistros.length} períodos estimados.` });
+    setMensaje({
+      tipo: 'ok',
+      texto: `Se generaron ${nuevosRegistros.length} períodos. Se omitieron ${omitidos} períodos porque ya existían.`,
+    });
     setGenerando(false);
+    await cargarDatos();
+  }
+
+  function clavePeriodo(cuentaTarjetaId: string, periodoResumen: string) {
+    return `${cuentaTarjetaId}::${periodoResumen}`;
+  }
+
+  function esDuplicado(item: CalendarioTarjeta) {
+    return calendarios.some(
+      (otro) =>
+        otro.id !== item.id &&
+        otro.cuenta_tarjeta_id === item.cuenta_tarjeta_id &&
+        otro.periodo_resumen === item.periodo_resumen,
+    );
+  }
+
+  function tieneCuotasAsociadas(item: CalendarioTarjeta) {
+    return periodosConCuotas.has(clavePeriodo(item.cuenta_tarjeta_id, item.periodo_resumen));
+  }
+
+  async function eliminarCalendario(item: CalendarioTarjeta) {
+    setMensaje(null);
+    const confirmacion = window.confirm('¿Querés eliminar este período de calendario?');
+    if (!confirmacion) return;
+
+    if (tieneCuotasAsociadas(item)) {
+      setMensaje({
+        tipo: 'error',
+        texto:
+          'No se puede eliminar este período porque tiene cuotas asociadas. Podés editar las fechas cuando tengas el cierre/vencimiento confirmado.',
+      });
+      return;
+    }
+
+    const { error } = await supabase.from('calendario_tarjetas').delete().eq('id', item.id);
+    if (error) {
+      setMensaje({ tipo: 'error', texto: 'No se pudo eliminar el período de calendario.' });
+      return;
+    }
+
+    if (calendarioEditandoId === item.id) limpiarFormulario();
+    setMensaje({ tipo: 'ok', texto: 'Período eliminado correctamente.' });
     await cargarDatos();
   }
 
@@ -331,6 +402,14 @@ export default function Page() {
         <p className="text-sm text-slate-600">
           El calendario por período es la fuente principal para proyectar en qué resumen entra cada gasto.
         </p>
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">
+          <p className="font-semibold">¿Qué significan los estados?</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            <li>Estimado: fecha calculada por la app usando el cierre habitual y los días hasta vencimiento.</li>
+            <li>Confirmado: fecha revisada por el usuario contra el resumen real del banco.</li>
+            <li>Importado: fecha obtenida desde un archivo, resumen o integración.</li>
+          </ul>
+        </div>
       </header>
 
       {mensaje && (
@@ -399,7 +478,7 @@ export default function Page() {
             onChange={(e) => setFormulario((prev) => ({ ...prev, estado_calendario: e.target.value as EstadoCalendario }))}
             className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
           >
-            {ESTADOS.map((estado) => (
+            {ESTADOS_VISIBLES.map((estado) => (
               <option key={estado} value={estado}>
                 {estadoLegible(estado)}
               </option>
@@ -521,17 +600,32 @@ export default function Page() {
                         <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${colorBadgeEstado(item.estado_calendario)}`}>
                           {estadoLegible(item.estado_calendario)}
                         </span>
+                        {esDuplicado(item) && (
+                          <span className="ml-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700">Duplicado</span>
+                        )}
+                        {tieneCuotasAsociadas(item) && (
+                          <span className="ml-1 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-700">Con cuotas</span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-slate-700">{item.origen_fecha}</td>
                       <td className="px-3 py-2 text-slate-700">{item.observaciones || '-'}</td>
                       <td className="px-3 py-2 text-right">
-                        <button
-                          type="button"
-                          onClick={() => editarCalendario(item)}
-                          className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-700"
-                        >
-                          Editar
-                        </button>
+                        <div className="flex justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => editarCalendario(item)}
+                            className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-700"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => eliminarCalendario(item)}
+                            className="rounded-lg border border-rose-300 px-2.5 py-1 text-xs text-rose-700"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -548,19 +642,36 @@ export default function Page() {
                       {estadoLegible(item.estado_calendario)}
                     </span>
                   </div>
+                  <div className="mb-2 flex gap-1">
+                    {esDuplicado(item) && (
+                      <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700">Duplicado</span>
+                    )}
+                    {tieneCuotasAsociadas(item) && (
+                      <span className="rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-700">Con cuotas</span>
+                    )}
+                  </div>
                   <div className="space-y-1 text-xs text-slate-600">
                     <p><span className="font-medium text-slate-700">Cierre:</span> {item.fecha_cierre}</p>
                     <p><span className="font-medium text-slate-700">Vencimiento:</span> {item.fecha_vencimiento}</p>
                     <p><span className="font-medium text-slate-700">Origen:</span> {item.origen_fecha}</p>
                     <p><span className="font-medium text-slate-700">Observaciones:</span> {item.observaciones || '-'}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => editarCalendario(item)}
-                    className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700"
-                  >
-                    Editar período
-                  </button>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => editarCalendario(item)}
+                      className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700"
+                    >
+                      Editar período
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => eliminarCalendario(item)}
+                      className="rounded-lg border border-rose-300 px-3 py-1.5 text-xs text-rose-700"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>
