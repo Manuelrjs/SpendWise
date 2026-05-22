@@ -266,7 +266,9 @@ export default function Page() {
   }
 
   async function guardar(event: FormEvent) {
-    event.preventDefault(); setError(null); setMensaje(null); setAdvertencia(null);
+    event.preventDefault();
+    if (guardando) return;
+    setError(null); setMensaje(null); setAdvertencia(null);
     const monto = Number(formulario.monto);
     if (!(monto > 0)) return setError('El monto debe ser mayor a 0.');
     if (!formulario.establecimiento.trim()) return setError('El establecimiento es obligatorio.');
@@ -280,10 +282,47 @@ export default function Page() {
       if (!validacionComprobante.valido) return setError(validacionComprobante.mensaje);
     }
     setGuardando(true);
+    let gastoCreadoId: string | null = null;
     try {
       const payload = { ...formulario, monto, establecimiento: formulario.establecimiento.trim(), cuenta_tarjeta_id: esTarjetaCredito ? formulario.cuenta_tarjeta_id : null, tarjeta_fisica_id: esTarjetaCredito ? formulario.tarjeta_fisica_id : null, cantidad_cuotas: esTarjetaCredito ? formulario.cantidad_cuotas : 1 };
+      let cuotasPayload: Array<Record<string, unknown>> = [];
+      let usaronEstimados = false;
+
+      if (esTarjetaCredito) {
+        const cuenta = cuentas.find((c) => c.id === formulario.cuenta_tarjeta_id);
+        if (!cuenta) throw new Error('No se encontró la cuenta de tarjeta seleccionada.');
+
+        const periodo = formatearPeriodoDesdeFecha(formulario.fecha_gasto);
+        const calendarioBase = await asegurarCalendario(cuenta, periodo);
+        usaronEstimados ||= calendarioBase.generado || calendarioBase.calendario.estado_calendario === 'estimado';
+        const resultado = calcularPeriodoTarjeta({ fecha_gasto: formulario.fecha_gasto, cuenta_tarjeta_id: cuenta.id, calendarios: [...calendarios, calendarioBase.calendario] });
+
+        for (let i = 0; i < formulario.cantidad_cuotas; i += 1) {
+          const periodoResumenCuota = i === 0 ? resultado.periodo_resumen : sumarMesesPeriodo(resultado.periodo_resumen, i);
+          const calCuota = await asegurarCalendario(cuenta, periodoResumenCuota);
+          usaronEstimados ||= calCuota.generado || calCuota.calendario.estado_calendario === 'estimado';
+          const periodoPago = i === 0 ? resultado.periodo_pago : sumarMesesPeriodo(resultado.periodo_pago, i);
+          cuotasPayload.push({
+            cuenta_tarjeta_id: cuenta.id,
+            tarjeta_fisica_id: formulario.tarjeta_fisica_id,
+            persona_id: formulario.persona_id,
+            establecimiento: formulario.establecimiento.trim(),
+            descripcion_cuota: formulario.descripcion.trim() || formulario.establecimiento.trim(),
+            numero_cuota: i + 1,
+            total_cuotas: formulario.cantidad_cuotas,
+            monto_cuota: monto / formulario.cantidad_cuotas,
+            moneda: formulario.moneda,
+            periodo_pago_estimado: periodoPago,
+            fecha_estimada_pago: calCuota.calendario.fecha_vencimiento,
+            estado: 'pendiente',
+            origen_cuota: 'gasto_nuevo',
+          });
+        }
+      }
+
       const { data: gasto, error: eg } = await supabase.from('gastos').insert(payload).select('id').single();
       if (eg || !gasto) throw new Error('No se pudo guardar el gasto.');
+      gastoCreadoId = gasto.id;
 
       if (comprobante) {
         const fechaComprobante = formulario.fecha_gasto ? new Date(`${formulario.fecha_gasto}T00:00:00`) : new Date();
@@ -320,41 +359,10 @@ export default function Page() {
         }
       }
 
-      if (esTarjetaCredito) {
-        const cuenta = cuentas.find((c) => c.id === formulario.cuenta_tarjeta_id);
-        if (!cuenta) throw new Error('No se encontró la cuenta de tarjeta seleccionada.');
-
-        let periodo = formatearPeriodoDesdeFecha(formulario.fecha_gasto);
-        let usaronEstimados = false;
-        const calendarioBase = await asegurarCalendario(cuenta, periodo);
-        usaronEstimados ||= calendarioBase.generado || calendarioBase.calendario.estado_calendario === 'estimado';
-        let resultado = calcularPeriodoTarjeta({ fecha_gasto: formulario.fecha_gasto, cuenta_tarjeta_id: cuenta.id, calendarios: [...calendarios, calendarioBase.calendario] });
-
-        const cuotasPayload = [];
-        for (let i = 0; i < formulario.cantidad_cuotas; i += 1) {
-          const periodoResumenCuota = i === 0 ? resultado.periodo_resumen : sumarMesesPeriodo(resultado.periodo_resumen, i);
-          const calCuota = await asegurarCalendario(cuenta, periodoResumenCuota);
-          usaronEstimados ||= calCuota.generado || calCuota.calendario.estado_calendario === 'estimado';
-          const periodoPago = i === 0 ? resultado.periodo_pago : sumarMesesPeriodo(resultado.periodo_pago, i);
-          cuotasPayload.push({
-            gasto_id: gasto.id,
-            cuenta_tarjeta_id: cuenta.id,
-            tarjeta_fisica_id: formulario.tarjeta_fisica_id,
-            persona_id: formulario.persona_id,
-            establecimiento: formulario.establecimiento.trim(),
-            descripcion_cuota: formulario.descripcion.trim() || formulario.establecimiento.trim(),
-            numero_cuota: i + 1,
-            total_cuotas: formulario.cantidad_cuotas,
-            monto_cuota: monto / formulario.cantidad_cuotas,
-            moneda: formulario.moneda,
-            periodo_pago_estimado: periodoPago,
-            fecha_estimada_pago: calCuota.calendario.fecha_vencimiento,
-            estado: 'pendiente',
-            origen_cuota: 'gasto_nuevo',
-          });
-        }
-        const { error: ec } = await supabase.from('cuotas_tarjeta').insert(cuotasPayload);
-        if (ec) throw new Error('Se guardó el gasto, pero falló la generación de cuotas.');
+      if (esTarjetaCredito && cuotasPayload.length > 0) {
+        const cuotasConGasto = cuotasPayload.map((cuota) => ({ ...cuota, gasto_id: gasto.id }));
+        const { error: ec } = await supabase.from('cuotas_tarjeta').insert(cuotasConGasto);
+        if (ec) throw new Error('No se pudo guardar el gasto con tarjeta. No se registró ningún gasto operativo.');
         if (usaronEstimados) setAdvertencia('Se usaron fechas estimadas de cierre/vencimiento. Podés confirmarlas luego desde Calendario.');
       }
 
@@ -363,6 +371,12 @@ export default function Page() {
       setComprobante(null);
     } catch (e) {
       console.error(e);
+      if (gastoCreadoId) {
+        await supabase
+          .from('gastos')
+          .update({ estado_registro: 'anulado', observaciones: 'Anulado automáticamente por error al generar compromiso de tarjeta.' })
+          .eq('id', gastoCreadoId);
+      }
       setError(e instanceof Error ? e.message : 'Ocurrió un error al guardar el gasto.');
     } finally { setGuardando(false); }
   }

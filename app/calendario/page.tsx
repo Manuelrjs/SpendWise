@@ -367,14 +367,14 @@ export default function Page() {
       setMensaje({
         tipo: 'error',
         texto:
-          'No se puede eliminar este período porque tiene cuotas asociadas. Podés editar las fechas cuando tengas el cierre/vencimiento confirmado.',
+          'No se puede eliminar este período porque tiene pagos de tarjeta asociados. Podés editar las fechas cuando tengas el cierre/vencimiento confirmado.',
       });
       return;
     }
     if (esItemDuplicado) {
       const cantidadMismoPeriodo = calendarios.filter((otro) => otro.cuenta_tarjeta_id === item.cuenta_tarjeta_id && otro.periodo_resumen === item.periodo_resumen).length;
       if (cantidadMismoPeriodo <= 1 && tieneCuotasAsociadas(item)) {
-        setMensaje({ tipo: 'error', texto: 'No se puede eliminar este período porque tiene cuotas asociadas.' });
+        setMensaje({ tipo: 'error', texto: 'No se puede eliminar este período porque tiene pagos de tarjeta asociados.' });
         return;
       }
     }
