@@ -6,10 +6,9 @@ import { MENSAJE_ERROR_BUCKET_COMPROBANTES, normalizarNombreArchivo, validarComp
 import {
   calcularPeriodoTarjeta,
   CalendarioTarjeta,
-  construirFechaCierreEstimada,
-  construirFechaVencimientoEstimada,
   formatearPeriodoDesdeFecha,
 } from '@/utils/tarjetas';
+import { obtenerOCrearCalendarioEstimado } from '@/lib/calendario-tarjetas';
 
 type Gasto = {
   id: string;
@@ -204,25 +203,18 @@ export default function Page() {
 
 
   async function asegurarCalendarioConversion(cuenta: CuentaTarjeta, periodo: string) {
-    const existente = calendarios.find((cal) => cal.cuenta_tarjeta_id === cuenta.id && cal.periodo_resumen === periodo);
-    if (existente) return existente;
-    if (!cuenta.dia_cierre_habitual || cuenta.dias_hasta_vencimiento === null) throw new Error('FALTA_CONFIG_CALENDARIO');
-    const fecha_cierre = construirFechaCierreEstimada(periodo, cuenta.dia_cierre_habitual);
-    const fecha_vencimiento = construirFechaVencimientoEstimada(fecha_cierre, cuenta.dias_hasta_vencimiento);
-    const payload = {
-      cuenta_tarjeta_id: cuenta.id,
-      periodo_resumen: periodo,
-      fecha_cierre,
-      fecha_vencimiento,
-      estado_calendario: 'estimado',
-      origen_fecha: 'calculado',
-      observaciones: 'Calendario generado automáticamente al convertir un gasto a tarjeta de crédito.',
-    };
-    const { data, error } = await supabase.from('calendario_tarjetas').insert(payload).select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones').single();
-    if (error || !data) throw error ?? new Error('No se pudo generar calendario estimado.');
-    const nuevo = data as CalendarioTarjeta;
-    setCalendarios((prev) => [...prev, nuevo]);
-    return nuevo;
+    try {
+      const resultado = await obtenerOCrearCalendarioEstimado({ supabase, cuenta, periodo, contexto: 'conversion' });
+      const calendario = resultado.calendario as CalendarioTarjeta;
+      setCalendarios((prev) => {
+        const sinMismoPeriodo = prev.filter((cal) => !(cal.cuenta_tarjeta_id === cuenta.id && cal.periodo_resumen === periodo));
+        return [...sinMismoPeriodo, calendario];
+      });
+      return calendario;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('configuración habitual')) throw new Error('FALTA_CONFIG_CALENDARIO');
+      throw error;
+    }
   }
 
   async function guardarEdicion(event: FormEvent) {

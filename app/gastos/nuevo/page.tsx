@@ -7,11 +7,10 @@ import { DatosComprobanteSugeridos, extraerDatosComprobante } from '@/lib/ia/ext
 import {
   calcularPeriodoTarjeta,
   CalendarioTarjeta,
-  construirFechaCierreEstimada,
-  construirFechaVencimientoEstimada,
   formatearPeriodoDesdeFecha,
   sumarMesesPeriodo,
 } from '@/utils/tarjetas';
+import { obtenerOCrearCalendarioEstimado } from '@/lib/calendario-tarjetas';
 
 type MedioPago = { id: string; nombre: string; tipo: string; activo: boolean; orden: number | null };
 type Categoria = { id: string; nombre: string; icono: string | null; color: string | null; activo: boolean; orden: number | null };
@@ -112,17 +111,13 @@ export default function Page() {
   }
 
   async function asegurarCalendario(cuenta: CuentaTarjeta, periodo: string) {
-    const existente = calendarios.find((cal) => cal.cuenta_tarjeta_id === cuenta.id && cal.periodo_resumen === periodo);
-    if (existente) return { calendario: existente, generado: false };
-    if (!cuenta.dia_cierre_habitual || cuenta.dias_hasta_vencimiento === null) throw new Error('Esta cuenta no tiene configuración habitual de cierre/vencimiento. Completala en Tarjetas o cargá el calendario manualmente.');
-    const fecha_cierre = construirFechaCierreEstimada(periodo, cuenta.dia_cierre_habitual);
-    const fecha_vencimiento = construirFechaVencimientoEstimada(fecha_cierre, cuenta.dias_hasta_vencimiento);
-    const payload = { cuenta_tarjeta_id: cuenta.id, periodo_resumen: periodo, fecha_cierre, fecha_vencimiento, estado_calendario: 'estimado', origen_fecha: 'calculado', observaciones: 'Calendario generado automáticamente al registrar un gasto.' };
-    const { data, error: err } = await supabase.from('calendario_tarjetas').insert(payload).select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones').single();
-    if (err) throw new Error('No se pudo generar el calendario estimado automáticamente.');
-    const nuevo = data as CalendarioTarjeta;
-    setCalendarios((prev) => [...prev, nuevo]);
-    return { calendario: nuevo, generado: true };
+    const resultado = await obtenerOCrearCalendarioEstimado({ supabase, cuenta, periodo, contexto: 'gasto' });
+    const calendario = resultado.calendario as CalendarioTarjeta;
+    setCalendarios((prev) => {
+      const sinMismoPeriodo = prev.filter((cal) => !(cal.cuenta_tarjeta_id === cuenta.id && cal.periodo_resumen === periodo));
+      return [...sinMismoPeriodo, calendario];
+    });
+    return { calendario, generado: resultado.generado };
   }
 
 
