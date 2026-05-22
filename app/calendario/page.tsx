@@ -31,6 +31,19 @@ type CalendarioTarjeta = {
   actualizado_en: string;
 };
 
+type GastoTarjeta = {
+  id: string;
+  cuenta_tarjeta_id: string | null;
+  fecha_gasto: string;
+  estado_registro: string;
+};
+
+type CuotaTarjeta = {
+  id: string;
+  gasto_id: string | null;
+  estado: string;
+};
+
 type FormularioCalendario = {
   cuenta_tarjeta_id: string;
   periodo_resumen: string;
@@ -112,6 +125,8 @@ export default function Page() {
   const [errorGeneracion, setErrorGeneracion] = useState('');
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
   const [periodosConCuotas, setPeriodosConCuotas] = useState<Set<string>>(new Set());
+  const [gastosTarjeta, setGastosTarjeta] = useState<GastoTarjeta[]>([]);
+  const [cuotasTarjeta, setCuotasTarjeta] = useState<CuotaTarjeta[]>([]);
 
   const tituloFormulario = useMemo(
     () => (calendarioEditandoId ? 'Editar período de calendario' : 'Nuevo período de calendario'),
@@ -132,6 +147,8 @@ export default function Page() {
       { data: dataCuentas, error: errorCuentas },
       { data: dataCalendarios, error: errorCalendarios },
       { data: dataCuotas, error: errorCuotas },
+      { data: dataGastos, error: errorGastos },
+      { data: dataCuotasPorGasto, error: errorCuotasPorGasto },
     ] =
       await Promise.all([
         supabase
@@ -145,9 +162,11 @@ export default function Page() {
           )
           .order('periodo_resumen', { ascending: false }),
         supabase.from('cuotas_tarjeta').select('cuenta_tarjeta_id, periodo_pago_estimado').neq('estado', 'cancelada'),
+        supabase.from('gastos').select('id,cuenta_tarjeta_id,fecha_gasto,estado_registro').not('cuenta_tarjeta_id', 'is', null).neq('estado_registro', 'anulado'),
+        supabase.from('cuotas_tarjeta').select('id,gasto_id,estado').neq('estado', 'cancelada'),
       ]);
 
-    if (errorCuentas || errorCalendarios || errorCuotas) {
+    if (errorCuentas || errorCalendarios || errorCuotas || errorGastos || errorCuotasPorGasto) {
       setMensaje({ tipo: 'error', texto: 'No se pudo cargar el calendario de tarjetas.' });
       setCargando(false);
       return;
@@ -165,6 +184,8 @@ export default function Page() {
     setCuentas(cuentasCargadas);
     setCalendarios(calendariosCargados);
     setPeriodosConCuotas(clavesConCuotas);
+    setGastosTarjeta((dataGastos ?? []) as GastoTarjeta[]);
+    setCuotasTarjeta((dataCuotasPorGasto ?? []) as CuotaTarjeta[]);
 
     setCuentaSeleccionadaId((actual) => {
       if (actual && cuentasCargadas.some((c) => c.id === actual)) return actual;
@@ -354,13 +375,46 @@ export default function Page() {
     return periodosConCuotas.has(clavePeriodo(item.cuenta_tarjeta_id, item.periodo_resumen));
   }
 
+  function obtenerRangoCalendario(item: CalendarioTarjeta) {
+    const calendariosCuentaOrdenados = calendarios
+      .filter((cal) => cal.cuenta_tarjeta_id === item.cuenta_tarjeta_id)
+      .sort((a, b) => a.fecha_cierre.localeCompare(b.fecha_cierre));
+    const indice = calendariosCuentaOrdenados.findIndex((cal) => cal.id === item.id);
+    const anterior = indice > 0 ? calendariosCuentaOrdenados[indice - 1] : null;
+    const inicio = anterior ? new Date(`${anterior.fecha_cierre}T00:00:00Z`) : null;
+    if (inicio) inicio.setUTCDate(inicio.getUTCDate() + 1);
+    const fin = new Date(`${item.fecha_cierre}T00:00:00Z`);
+    return { inicio, fin };
+  }
+
+  function gastoPerteneceACalendario(gasto: GastoTarjeta, calendario: CalendarioTarjeta) {
+    if (gasto.cuenta_tarjeta_id !== calendario.cuenta_tarjeta_id) return false;
+    const fechaGasto = new Date(`${gasto.fecha_gasto}T00:00:00Z`);
+    const { inicio, fin } = obtenerRangoCalendario(calendario);
+    if (inicio && fechaGasto < inicio) return false;
+    return fechaGasto <= fin;
+  }
+
   async function eliminarCalendario(item: CalendarioTarjeta) {
     setMensaje(null);
     const confirmacion = window.confirm('¿Querés eliminar este período de calendario?');
     if (!confirmacion) return;
 
     const esItemDuplicado = esDuplicado(item);
-    if (tieneCuotasAsociadas(item) && !esItemDuplicado) {
+    const gastosAsociados = gastosTarjeta.filter((gasto) => gastoPerteneceACalendario(gasto, item));
+    const idsGastosAsociados = new Set(gastosAsociados.map((gasto) => gasto.id));
+    const cuotasDerivadas = cuotasTarjeta.filter((cuota) => cuota.gasto_id && idsGastosAsociados.has(cuota.gasto_id));
+
+    if (gastosAsociados.length > 0) {
+      setMensaje({
+        tipo: 'error',
+        texto:
+          'No se puede eliminar este período porque tiene gastos de tarjeta asociados. Podés editar las fechas cuando tengas el cierre/vencimiento confirmado.',
+      });
+      return;
+    }
+
+    if ((tieneCuotasAsociadas(item) || cuotasDerivadas.length > 0) && !esItemDuplicado) {
       setMensaje({
         tipo: 'error',
         texto:
