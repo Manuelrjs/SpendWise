@@ -119,26 +119,46 @@ export default function Page() {
     } catch (e) { setError(e instanceof Error ? e.message : 'Error inesperado al guardar.'); } finally { setGuardando(false); }
   }
 
+  async function obtenerCuotasCompra(compraId: string) {
+    const { data, error: err } = await supabase.from('cuotas_tarjeta').select('id,compra_cuota_inicial_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,moneda,estado,origen_cuota,observaciones,tarjeta_fisica_id,persona_id').eq('compra_cuota_inicial_id', compraId).order('numero_cuota');
+    if (err) throw new Error('No se pudieron consultar las cuotas generadas.');
+    return (data ?? []) as CuotaGenerada[];
+  }
+
   async function verCuotas(compraId: string) {
     if (cuotasPorCompra[compraId]) return setCompraExpandida((prev) => (prev === compraId ? null : compraId));
-    const { data, error: err } = await supabase.from('cuotas_tarjeta').select('id,compra_cuota_inicial_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,moneda,estado,origen_cuota,observaciones,tarjeta_fisica_id,persona_id').eq('compra_cuota_inicial_id', compraId).order('numero_cuota');
-    if (err) return setError('No se pudieron consultar las cuotas generadas.');
-    setCuotasPorCompra((prev) => ({ ...prev, [compraId]: (data ?? []) as CuotaGenerada[] }));
-    setCompraExpandida(compraId);
+    try {
+      const cuotas = await obtenerCuotasCompra(compraId);
+      setCuotasPorCompra((prev) => ({ ...prev, [compraId]: cuotas }));
+      setCompraExpandida(compraId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudieron consultar las cuotas generadas.');
+    }
   }
 
   async function iniciarEdicion(compra: CompraInicial) {
-    await verCuotas(compra.id);
+    setError(null);
+    setMensaje(null);
+    let cuotas: CuotaGenerada[] = [];
+    try {
+      cuotas = cuotasPorCompra[compra.id] ?? await obtenerCuotasCompra(compra.id);
+    } catch (e) {
+      return setError(e instanceof Error ? e.message : 'No se pudieron consultar las cuotas generadas.');
+    }
+    setCuotasPorCompra((prev) => ({ ...prev, [compra.id]: cuotas }));
+    setCompraExpandida(compra.id);
     setCompraEditandoId(compra.id);
     setEdicionCompra({
       fecha_compra_original: compra.fecha_compra_original ?? '', establecimiento: compra.establecimiento ?? '', descripcion_compra: compra.descripcion_compra ?? '', categoria_id: compra.categoria_id ?? '', observaciones: compra.observaciones ?? '', tarjeta_fisica_id: compra.tarjeta_fisica_id ?? '', persona_id: compra.persona_id,
     });
-    const cuotas = cuotasPorCompra[compra.id] ?? [];
-    setPeriodosEdicionCuotas(Object.fromEntries(cuotas.map((cuota) => [cuota.id, cuota.periodo_pago_estimado])));
+    const cuotasEditables = cuotas;
+    setPeriodosEdicionCuotas(Object.fromEntries(cuotasEditables.map((cuota) => [cuota.id, cuota.periodo_pago_estimado])));
   }
 
   async function guardarEdicion(compra: CompraInicial) {
     if (!compraEditandoId) return;
+    setError(null);
+    setMensaje(null);
     const payload = {
       fecha_compra_original: edicionCompra.fecha_compra_original || null,
       establecimiento: edicionCompra.establecimiento?.trim() || null,
@@ -186,13 +206,21 @@ export default function Page() {
       }
     }
 
-    setMensaje('Carga inicial actualizada correctamente.');
-    if (huboCambioNoEditable) {
-      setError(MENSAJE_CUOTA_NO_EDITABLE);
-    }
-    setCompraEditandoId(null);
     await cargarDatos();
-    await verCuotas(compra.id);
+    const { data: compraActualizada, error: errorCompraActualizada } = await supabase
+      .from('compras_cuotas_iniciales')
+      .select('id,fecha_compra_original,establecimiento,descripcion_compra,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,categoria_id,observaciones,cuota_inicio_pendiente,total_cuotas,monto_cuota,moneda,periodo_inicio_pago,estado')
+      .eq('id', compra.id)
+      .single();
+    if (errorCompraActualizada || !compraActualizada) return setError('Se guardó la edición, pero no se pudo refrescar la carga inicial.');
+    const cuotasActualizadas = await obtenerCuotasCompra(compra.id);
+    setCompras((prev) => prev.map((item) => item.id === compra.id ? (compraActualizada as CompraInicial) : item));
+    setCuotasPorCompra((prev) => ({ ...prev, [compra.id]: cuotasActualizadas }));
+    setCompraExpandida(compra.id);
+    setPeriodosEdicionCuotas(Object.fromEntries(cuotasActualizadas.map((cuota) => [cuota.id, cuota.periodo_pago_estimado])));
+    setCompraEditandoId(null);
+    setMensaje('Carga inicial actualizada correctamente.');
+    if (huboCambioNoEditable) setError(MENSAJE_CUOTA_NO_EDITABLE);
   }
 
   async function resolverCalendarioParaPeriodo(cuentaTarjetaId: string, periodoResumen: string): Promise<{ fecha_vencimiento: string } | null> {
