@@ -24,12 +24,16 @@ const esGastoAnulado = (estadoRegistro: string | null | undefined) => String(est
 const esGastoActivo = (estadoRegistro: string | null | undefined) => !esGastoAnulado(estadoRegistro);
 const esCompromisoActivo = (estado: string | null | undefined) => ESTADOS_COMPROMISO_ACTIVO.has(String(estado ?? '').toLowerCase());
 const esEstadoAnuladoOCancelado = (estado: string | null | undefined) => ESTADOS_COMPROMISO_INACTIVO.has(String(estado ?? '').toLowerCase());
-const esCargaInicialActiva = (compraInicial: AnyObj | null | undefined) => {
+const ESTADOS_CARGA_INICIAL_INACTIVA = new Set(['anulado', 'anulada', 'cancelado', 'cancelada']);
+
+const esCargaInicialActiva = (compraInicial: AnyObj | null | undefined, puedeEvaluarEstadoCargaInicial: boolean) => {
   if (!compraInicial) return false;
-  const estado = String(compraInicial.estado_registro ?? compraInicial.estado ?? '').toLowerCase();
+  if (!puedeEvaluarEstadoCargaInicial) return true;
   const activo = compraInicial.activo;
-  if (typeof activo === 'boolean' && !activo) return false;
-  return !esEstadoAnuladoOCancelado(estado);
+  if (typeof activo === 'boolean') return activo;
+  const estado = String(compraInicial.estado ?? '').toLowerCase();
+  if (!estado) return true;
+  return !ESTADOS_CARGA_INICIAL_INACTIVA.has(estado);
 };
 const periodoDesdeFecha = (fecha: string) => fecha.slice(0, 7);
 
@@ -73,7 +77,7 @@ export default function MantenimientoPage() {
         .from('calendario_tarjetas')
         .select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones,creado_en')
         .order('creado_en', { ascending: true }),
-      supabase.from('compras_cuotas_iniciales').select('id,estado,estado_registro,activo,periodo_inicio'),
+      supabase.from('compras_cuotas_iniciales').select('id,estado,periodo_inicio_pago'),
     ]);
 
     const erroresBase: Partial<Record<DiagnosticoKey, string>> = {};
@@ -108,6 +112,13 @@ export default function MantenimientoPage() {
     const cuotas = (cuotasRes.data ?? []) as AnyObj[];
     const calendarios = (calendariosRes.data ?? []) as CalendarioTarjetaDB[];
     const comprasIniciales = new Map((comprasInicialesRes.data ?? []).map((c: AnyObj) => [c.id, c]));
+    const columnasComprasIniciales = Object.keys((comprasInicialesRes.data?.[0] ?? {}) as AnyObj);
+    const tieneColumnaEstadoCargaInicial = columnasComprasIniciales.includes('estado');
+    const tieneColumnaActivoCargaInicial = columnasComprasIniciales.includes('activo');
+    const puedeEvaluarEstadoCargaInicial = tieneColumnaEstadoCargaInicial || tieneColumnaActivoCargaInicial;
+    if ((comprasInicialesRes.data?.length ?? 0) > 0 && !puedeEvaluarEstadoCargaInicial) {
+      console.warn('No se encontró columna de estado en compras_cuotas_iniciales; se usará estado de cuotas_tarjeta.');
+    }
 
     const gastosActivos = gastos.filter((g) => esGastoActivo(g.estado_registro));
     const gastosTarjeta = gastosActivos.filter((g) => g.medio_pago?.tipo === 'tarjeta_credito' && g.cuenta_tarjeta_id);
@@ -171,11 +182,11 @@ export default function MantenimientoPage() {
             cargasInicialesARevisar.push({ ...cuota, motivo_revision: 'No se pudo validar la carga inicial asociada.' });
             continue;
           }
-          if (!esCargaInicialActiva(compraInicial)) {
+          if (!esCargaInicialActiva(compraInicial, puedeEvaluarEstadoCargaInicial)) {
             compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Carga inicial anulada' });
             continue;
           }
-          const periodoResumenExplicito = String(cuota.periodo_resumen ?? compraInicial.periodo_resumen ?? '').slice(0, 7);
+          const periodoResumenExplicito = String(cuota.periodo_resumen ?? compraInicial.periodo_inicio_pago ?? '').slice(0, 7);
           const periodoPago = String(cuota.periodo_pago_estimado ?? '').slice(0, 7);
           const periodoObjetivo = periodoResumenExplicito || periodoPago;
           if (!periodoObjetivo || !/^\d{4}-\d{2}$/.test(periodoObjetivo)) {
@@ -261,7 +272,7 @@ export default function MantenimientoPage() {
 
   async function abrirDetalleCargaInicialDesdeCuota(cuota: AnyObj) {
     if (!cuota.compra_cuota_inicial_id) return;
-    const { data: compra, error } = await supabase.from('compras_cuotas_iniciales').select('id,establecimiento,descripcion_compra,monto_total,monto_cuota,moneda,cuotas_pendientes,total_cuotas,periodo_inicio,estado,estado_registro,activo,persona:personas(nombre,apellido),cuenta:cuentas_tarjeta(nombre_cuenta)').eq('id', cuota.compra_cuota_inicial_id).maybeSingle();
+    const { data: compra, error } = await supabase.from('compras_cuotas_iniciales').select('id,fecha_compra_original,establecimiento,descripcion_compra,monto_cuota,moneda,cuota_inicio_pendiente,total_cuotas,periodo_inicio_pago,estado,observaciones,persona:personas(nombre,apellido),cuenta:cuentas_tarjeta(nombre_cuenta)').eq('id', cuota.compra_cuota_inicial_id).maybeSingle();
     if (error || !compra) {
       setMensaje('No se pudo cargar el detalle de la carga inicial.');
       return;
