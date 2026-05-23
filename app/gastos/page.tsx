@@ -4,9 +4,9 @@ import { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, useEffect, useMemo, 
 import { supabase } from '@/lib/supabase/client';
 import { MENSAJE_ERROR_BUCKET_COMPROBANTES, normalizarNombreArchivo, validarComprobante } from '@/lib/comprobantes';
 import {
+  calcularPeriodoResumenYVencimiento,
   calcularPeriodoTarjeta,
   CalendarioTarjeta,
-  formatearPeriodoDesdeFecha,
 } from '@/utils/tarjetas';
 import { obtenerOCrearCalendarioEstimado } from '@/lib/calendario-tarjetas';
 
@@ -253,10 +253,20 @@ export default function Page() {
       if (!tieneCuotas && !originalTarjeta && nuevoTarjeta) {
         const cuenta = cuentasTarjeta.find((c) => c.id === gastoEditando.cuenta_tarjeta_id);
         if (!cuenta) throw new Error('CUENTA_INVALIDA');
-        const periodoBase = formatearPeriodoDesdeFecha(gastoEditando.fecha_gasto);
-        const calendarioBase = await asegurarCalendarioConversion(cuenta, periodoBase);
+        if (cuenta.dia_cierre_habitual === null || cuenta.dias_hasta_vencimiento === null) {
+          throw new Error('FALTA_CONFIG_CALENDARIO');
+        }
+        const calculoBase = calcularPeriodoResumenYVencimiento({
+          fecha_gasto: gastoEditando.fecha_gasto,
+          dia_cierre_habitual: cuenta.dia_cierre_habitual,
+          dias_hasta_vencimiento: cuenta.dias_hasta_vencimiento,
+        });
+        const calendarioBase = await asegurarCalendarioConversion(cuenta, calculoBase.periodo_resumen);
         const resultadoPeriodo = calcularPeriodoTarjeta({ fecha_gasto: gastoEditando.fecha_gasto, cuenta_tarjeta_id: cuenta.id, calendarios: [...calendarios, calendarioBase] });
         const calendarioPago = await asegurarCalendarioConversion(cuenta, resultadoPeriodo.periodo_resumen);
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[tarjeta][conversion][calculo]', { fecha_gasto: gastoEditando.fecha_gasto, dia_cierre_habitual: cuenta.dia_cierre_habitual, dias_hasta_vencimiento: cuenta.dias_hasta_vencimiento, periodo_resumen: resultadoPeriodo.periodo_resumen, fecha_cierre: resultadoPeriodo.fecha_cierre, fecha_vencimiento: resultadoPeriodo.fecha_vencimiento, periodo_pago_estimado: resultadoPeriodo.periodo_pago });
+        }
         const { error: cuotaError } = await supabase.from('cuotas_tarjeta').insert({
           gasto_id: gastoEditando.id,
           compra_cuota_inicial_id: null,
@@ -294,7 +304,9 @@ export default function Page() {
           descripcion: original.descripcion,
           observaciones: original.observaciones,
         }).eq('id', gastoEditando.id);
-        return setError('No se pudo convertir el gasto a tarjeta de crédito. Revisá la cuenta, tarjeta y calendario.');
+        return setError(error instanceof Error && error.message === 'FALTA_CONFIG_CALENDARIO'
+          ? 'Esta cuenta no tiene configuración habitual de cierre/vencimiento. Completala en Tarjetas o cargá el calendario manualmente.'
+          : 'No se pudo convertir el gasto a tarjeta de crédito. Revisá la cuenta, tarjeta y calendario.');
       }
       return setError('No se pudo guardar la edición.');
     }

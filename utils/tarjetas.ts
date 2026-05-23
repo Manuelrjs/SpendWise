@@ -23,6 +23,13 @@ export interface ResultadoPeriodoTarjeta {
   advertencia: string | null;
 }
 
+export interface ResultadoPeriodoResumenYVencimiento {
+  periodo_resumen: string;
+  fecha_cierre: string;
+  fecha_vencimiento: string;
+  periodo_pago_estimado: string;
+}
+
 export function normalizarFecha(fecha: FechaEntrada): Date {
   if (fecha instanceof Date) {
     if (Number.isNaN(fecha.getTime())) {
@@ -98,6 +105,32 @@ export function construirFechaVencimientoEstimada(
   const vencimiento = new Date(cierre.getTime());
   vencimiento.setUTCDate(vencimiento.getUTCDate() + diasHastaVencimiento);
   return vencimiento.toISOString().slice(0, 10);
+}
+
+export function calcularPeriodoResumenYVencimiento(params: {
+  fecha_gasto: FechaEntrada;
+  dia_cierre_habitual: number;
+  dias_hasta_vencimiento: number;
+}): ResultadoPeriodoResumenYVencimiento {
+  const fechaGasto = normalizarFecha(params.fecha_gasto);
+  const periodoBase = formatearPeriodoDesdeFecha(fechaGasto);
+  const fechaCierreDelMes = construirFechaCierreEstimada(periodoBase, params.dia_cierre_habitual);
+  const cierreDelMes = normalizarFecha(fechaCierreDelMes);
+
+  const periodoResumen = fechaGasto.getTime() <= cierreDelMes.getTime()
+    ? periodoBase
+    : sumarMesesPeriodo(periodoBase, 1);
+  const fechaCierre = periodoResumen === periodoBase
+    ? fechaCierreDelMes
+    : construirFechaCierreEstimada(periodoResumen, params.dia_cierre_habitual);
+  const fechaVencimiento = construirFechaVencimientoEstimada(fechaCierre, params.dias_hasta_vencimiento);
+
+  return {
+    periodo_resumen: periodoResumen,
+    fecha_cierre: fechaCierre,
+    fecha_vencimiento: fechaVencimiento,
+    periodo_pago_estimado: formatearPeriodoDesdeFecha(fechaVencimiento),
+  };
 }
 
 export function ordenarCalendariosPorCierre(
