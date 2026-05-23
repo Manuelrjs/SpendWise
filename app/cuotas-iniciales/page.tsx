@@ -2,9 +2,9 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
-import { sumarMesesPeriodo } from '@/utils/tarjetas';
+import { construirFechaCierreEstimada, construirFechaVencimientoEstimada, sumarMesesPeriodo } from '@/utils/tarjetas';
 
-type CuentaTarjeta = { id: string; nombre_cuenta: string; banco: string | null; marca: string | null };
+type CuentaTarjeta = { id: string; nombre_cuenta: string; banco: string | null; marca: string | null; dia_cierre_habitual: number | null; dias_hasta_vencimiento: number | null };
 type TarjetaFisica = { id: string; cuenta_tarjeta_id: string; persona_id: string; alias: string | null; tipo: string; ultimos_4_digitos: string | null };
 type Persona = { id: string; nombre: string; apellido: string | null };
 type Categoria = { id: string; nombre: string };
@@ -31,6 +31,7 @@ type Formulario = { fecha_compra_original: string; establecimiento: string; desc
 const FORMATO_PERIODO = /^[0-9]{4}-(0[1-9]|1[0-2])$/;
 const ESTADOS_EDITABLES = new Set(['pendiente', 'proyectada', 'no_incluida', 'reprogramada']);
 const ESTADOS_NO_PROPAGAR = new Set(['pagada', 'cancelada']);
+const MENSAJE_CUOTA_NO_EDITABLE = 'Esta cuota no puede modificarse porque ya está pagada o cancelada.';
 
 const inicial: Formulario = { fecha_compra_original: '', establecimiento: '', descripcion_compra: '', cuenta_tarjeta_id: '', tarjeta_fisica_id: '', persona_id: '', cuota_inicio_pendiente: 1, total_cuotas: 1, monto_cuota: '', moneda: 'ARS', periodo_inicio_pago: '', categoria_id: '', observaciones: '' };
 
@@ -76,7 +77,7 @@ export default function Page() {
 
   async function cargarDatos() {
     const [ct, tf, p, c, ci] = await Promise.all([
-      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,banco,marca').eq('activo', true).order('nombre_cuenta'),
+      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,banco,marca,dia_cierre_habitual,dias_hasta_vencimiento').eq('activo', true).order('nombre_cuenta'),
       supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,alias,tipo,ultimos_4_digitos').eq('activo', true),
       supabase.from('personas').select('id,nombre,apellido').eq('activo', true).order('nombre'),
       supabase.from('categorias').select('id,nombre').eq('activo', true).order('nombre'),
@@ -151,12 +152,32 @@ export default function Page() {
     if (errCompra) return setError('No se pudo guardar la edición de la carga inicial.');
 
     const cuotas = cuotasPorCompra[compraEditandoId] ?? [];
+    let huboCambioNoEditable = false;
     for (const cuota of cuotas) {
       const periodoNuevo = periodosEdicionCuotas[cuota.id];
-      if (periodoNuevo && periodoNuevo !== cuota.periodo_pago_estimado && ESTADOS_EDITABLES.has(cuota.estado)) {
-        if (!FORMATO_PERIODO.test(periodoNuevo)) return setError('Los períodos editados deben tener formato AAAA-MM.');
-        const { error } = await supabase.from('cuotas_tarjeta').update({ periodo_pago_estimado: periodoNuevo }).eq('id', cuota.id);
-        if (error) return setError('No se pudo actualizar el período de una cuota pendiente.');
+      if (periodoNuevo && periodoNuevo !== cuota.periodo_pago_estimado) {
+        if (!FORMATO_PERIODO.test(periodoNuevo)) return setError('El período debe tener formato YYYY-MM.');
+        if (!ESTADOS_EDITABLES.has(cuota.estado)) {
+          huboCambioNoEditable = true;
+        } else {
+          const calendario = await resolverCalendarioParaPeriodo(compra.cuenta_tarjeta_id, periodoNuevo);
+          if (!calendario) {
+            return setError('No se pudo mover la cuota porque la cuenta no tiene configuración habitual de cierre/vencimiento.');
+          }
+          const observacionesAnteriores = cuota.observaciones?.trim() ?? '';
+          const notaReprogramacion = 'Período modificado manualmente.';
+          const observacionesActualizadas = observacionesAnteriores.includes(notaReprogramacion)
+            ? observacionesAnteriores
+            : [observacionesAnteriores, notaReprogramacion].filter(Boolean).join(' ');
+          const { error } = await supabase.from('cuotas_tarjeta').update({
+            periodo_pago_estimado: periodoNuevo,
+            fecha_estimada_pago: calendario.fecha_vencimiento,
+            estado: cuota.estado === 'pendiente' ? 'reprogramada' : cuota.estado,
+            observaciones: observacionesActualizadas || null,
+            actualizado_en: new Date().toISOString(),
+          }).eq('id', cuota.id);
+          if (error) return setError('No se pudo actualizar el período de una cuota pendiente.');
+        }
       }
       const cambioPersonaOTarjeta = (edicionCompra.persona_id && edicionCompra.persona_id !== cuota.persona_id) || (edicionCompra.tarjeta_fisica_id !== undefined && (edicionCompra.tarjeta_fisica_id || null) !== cuota.tarjeta_fisica_id);
       if (cambioPersonaOTarjeta && !ESTADOS_NO_PROPAGAR.has(cuota.estado)) {
@@ -166,9 +187,44 @@ export default function Page() {
     }
 
     setMensaje('Carga inicial actualizada correctamente.');
+    if (huboCambioNoEditable) {
+      setError(MENSAJE_CUOTA_NO_EDITABLE);
+    }
     setCompraEditandoId(null);
     await cargarDatos();
     await verCuotas(compra.id);
+  }
+
+  async function resolverCalendarioParaPeriodo(cuentaTarjetaId: string, periodoResumen: string): Promise<{ fecha_vencimiento: string } | null> {
+    const { data: calendarioExistente, error: errorConsulta } = await supabase
+      .from('calendario_tarjetas')
+      .select('id,fecha_vencimiento')
+      .eq('cuenta_tarjeta_id', cuentaTarjetaId)
+      .eq('periodo_resumen', periodoResumen)
+      .maybeSingle();
+    if (errorConsulta) throw new Error('No se pudo validar el calendario de la cuenta.');
+    if (calendarioExistente?.fecha_vencimiento) return { fecha_vencimiento: calendarioExistente.fecha_vencimiento };
+
+    const cuenta = cuentas.find((item) => item.id === cuentaTarjetaId);
+    if (!cuenta?.dia_cierre_habitual || cuenta.dias_hasta_vencimiento === null) return null;
+    const fechaCierre = construirFechaCierreEstimada(periodoResumen, cuenta.dia_cierre_habitual);
+    const fechaVencimiento = construirFechaVencimientoEstimada(fechaCierre, cuenta.dias_hasta_vencimiento);
+
+    const { data: calendarioCreado, error: errorCreacion } = await supabase
+      .from('calendario_tarjetas')
+      .insert({
+        cuenta_tarjeta_id: cuentaTarjetaId,
+        periodo_resumen: periodoResumen,
+        fecha_cierre: fechaCierre,
+        fecha_vencimiento: fechaVencimiento,
+        estado_calendario: 'estimado',
+        origen_fecha: 'automatico',
+        observaciones: 'Generado automáticamente al reprogramar cuota de carga inicial.',
+      })
+      .select('id,fecha_vencimiento')
+      .single();
+    if (errorCreacion || !calendarioCreado?.fecha_vencimiento) return null;
+    return { fecha_vencimiento: calendarioCreado.fecha_vencimiento };
   }
 
   async function anular(compraId: string) {
@@ -256,7 +312,7 @@ export default function Page() {
                   <tbody>
                     {cuotasPorCompra[compra.id].slice(0, mostrarTodasCuotas[compra.id] || cuotasPorCompra[compra.id].length <= 10 ? undefined : 10).map((cuota) => <tr key={cuota.id} className="border-b align-top">
                       <td className="px-2 py-1">{cuota.numero_cuota}/{cuota.total_cuotas}</td>
-                      <td className="px-2 py-1">{compraEditandoId === compra.id && ESTADOS_EDITABLES.has(cuota.estado) ? <input value={periodosEdicionCuotas[cuota.id] ?? cuota.periodo_pago_estimado} onChange={(e) => setPeriodosEdicionCuotas((prev) => ({ ...prev, [cuota.id]: e.target.value }))} className="w-24 rounded border px-1 py-0.5" /> : <span className="inline-flex rounded bg-slate-100 px-2 py-0.5">{cuota.periodo_pago_estimado}</span>}</td>
+                      <td className="px-2 py-1">{compraEditandoId === compra.id && ESTADOS_EDITABLES.has(cuota.estado) ? <div className="space-y-1"><input value={periodosEdicionCuotas[cuota.id] ?? cuota.periodo_pago_estimado} onChange={(e) => setPeriodosEdicionCuotas((prev) => ({ ...prev, [cuota.id]: e.target.value }))} className="w-24 rounded border px-1 py-0.5" />{(periodosEdicionCuotas[cuota.id] ?? cuota.periodo_pago_estimado) !== cuota.periodo_pago_estimado ? <p className="text-[10px] text-amber-700">Modificado manualmente</p> : null}</div> : <span className="inline-flex rounded bg-slate-100 px-2 py-0.5">{cuota.periodo_pago_estimado}</span>}</td>
                       <td className="px-2 py-1">{new Intl.NumberFormat('es-AR', { style: 'currency', currency: cuota.moneda }).format(cuota.monto_cuota)}</td>
                       <td className="px-2 py-1">{cuota.estado}</td>
                       <td className="px-2 py-1">{cuota.origen_cuota ?? '-'}</td>
@@ -265,7 +321,7 @@ export default function Page() {
                   </tbody>
                 </table>
               </div>
-              {compraEditandoId !== compra.id ? <p className="text-[11px] text-slate-500">Para editar períodos, primero presioná “Editar carga”.</p> : null}
+              {compraEditandoId !== compra.id ? <p className="text-[11px] text-slate-500">Para editar períodos, primero presioná “Editar carga”.</p> : <p className="text-[11px] text-slate-500">Podés modificar el período si una cuota no fue cobrada en el resumen esperado.</p>}
             </div>}
           </article>)}{compras.length === 0 && <p className="text-sm text-slate-500">Todavía no hay cargas iniciales.</p>}</div>
       </div>
