@@ -34,6 +34,7 @@ const esCargaInicialActiva = (compraInicial: AnyObj | null | undefined) => {
 const periodoDesdeFecha = (fecha: string) => fecha.slice(0, 7);
 
 export default function MantenimientoPage() {
+  const esDesarrollo = process.env.NODE_ENV !== 'production';
   const [cargando, setCargando] = useState(false);
   const [mensaje, setMensaje] = useState('');
   const [cardSeleccionada, setCardSeleccionada] = useState<DiagnosticoKey | null>(null);
@@ -48,6 +49,7 @@ export default function MantenimientoPage() {
     gastosDuplicados: [] as { key: string; items: AnyObj[] }[],
     compromisosCancelados: [] as AnyObj[],
   });
+  const [erroresDiagnostico, setErroresDiagnostico] = useState<Partial<Record<DiagnosticoKey, string>>>({});
 
   const estimarPeriodoResumenYPago = (fecha: string, dia: number | null, dias: number | null) => {
     if (!dia || dias === null) return { periodo_resumen: periodoDesdeFecha(fecha), periodo_pago_estimado: periodoDesdeFecha(fecha), fecha_cierre: null, fecha_vencimiento: null };
@@ -58,6 +60,8 @@ export default function MantenimientoPage() {
   async function diagnosticar() {
     setCargando(true);
     setMensaje('');
+    setErroresDiagnostico({});
+
     const [gastosRes, cuotasRes, calendariosRes, comprasInicialesRes] = await Promise.all([
       supabase
         .from('gastos')
@@ -72,11 +76,33 @@ export default function MantenimientoPage() {
       supabase.from('compras_cuotas_iniciales').select('id,estado,estado_registro,activo,periodo_inicio'),
     ]);
 
-    if (gastosRes.error || cuotasRes.error || calendariosRes.error || comprasInicialesRes.error) {
-      setMensaje('No se pudo ejecutar diagnóstico.');
-      setCargando(false);
-      return;
+    const erroresBase: Partial<Record<DiagnosticoKey, string>> = {};
+    const registrarError = (seccion: DiagnosticoKey, nombreSeccion: string, error: any) => {
+      const detalle = error?.message ?? 'Error desconocido';
+      erroresBase[seccion] = detalle;
+      console.error(`Error diagnóstico - ${nombreSeccion}`, {
+        message: error?.message,
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint,
+        stack: error?.stack,
+        raw: error,
+      });
+    };
+
+    if (gastosRes.error) registrarError('gastosSinCompromiso', 'gastos de tarjeta sin compromiso', gastosRes.error);
+    if (cuotasRes.error) {
+      registrarError('compromisosSinCalendario', 'compromisos sin calendario', cuotasRes.error);
+      registrarError('cargasInicialesARevisar', 'cargas iniciales a revisar', cuotasRes.error);
+      registrarError('compromisosHuerfanosAnulados', 'compromisos huérfanos/anulados', cuotasRes.error);
+      registrarError('compromisosCancelados', 'compromisos cancelados/anulados', cuotasRes.error);
     }
+    if (calendariosRes.error) {
+      registrarError('compromisosSinCalendario', 'compromisos sin calendario', calendariosRes.error);
+      registrarError('duplicadosCalendario', 'calendarios duplicados', calendariosRes.error);
+      registrarError('calendariosSinUso', 'calendarios sin uso', calendariosRes.error);
+    }
+    if (comprasInicialesRes.error) registrarError('cargasInicialesARevisar', 'cargas iniciales a revisar', comprasInicialesRes.error);
 
     const gastos = (gastosRes.data ?? []) as AnyObj[];
     const cuotas = (cuotasRes.data ?? []) as AnyObj[];
@@ -87,26 +113,23 @@ export default function MantenimientoPage() {
     const gastosTarjeta = gastosActivos.filter((g) => g.medio_pago?.tipo === 'tarjeta_credito' && g.cuenta_tarjeta_id);
     const gastosPorId = new Map(gastos.map((g) => [g.id, g]));
 
-    const compromisosCancelados = cuotas.filter((c) => ESTADOS_COMPROMISO_INACTIVO.has(String(c.estado ?? '').toLowerCase()));
+    const compromisosCancelados: AnyObj[] = [];
 
     const compromisosHuerfanosAnulados: (AnyObj & { motivo_huerfano: string })[] = [];
     const compromisosSinCalendario: AnyObj[] = [];
     const cargasInicialesARevisar: (AnyObj & { motivo_revision: string })[] = [];
-    const seccionesConAdvertencias: string[] = [];
-    const safePushSeccion = (seccion: string, fn: () => void) => {
+    const safePushSeccion = (seccion: DiagnosticoKey, nombreSeccion: string, fn: () => void) => {
       try {
         fn();
       } catch (error) {
-        seccionesConAdvertencias.push(seccion);
-        console.error(`Error en diagnóstico (${seccion})`, error);
+        registrarError(seccion, nombreSeccion, error);
       }
     };
 
-    safePushSeccion('compromisos cancelados/anulados', () => {
-      // calculado arriba por simple filtro, pero lo encapsulamos para robustez conceptual.
-      void compromisosCancelados.length;
+    safePushSeccion('compromisosCancelados', 'compromisos cancelados/anulados', () => {
+      compromisosCancelados.push(...cuotas.filter((c) => ESTADOS_COMPROMISO_INACTIVO.has(String(c.estado ?? '').toLowerCase())));
     });
-    safePushSeccion('compromisos sin calendario', () => {
+    safePushSeccion('compromisosSinCalendario', 'compromisos sin calendario', () => {
       for (const cuota of cuotas) {
         const estado = String(cuota.estado ?? '').toLowerCase();
         if (ESTADOS_COMPROMISO_NO_REPARABLE.has(estado) || !esCompromisoActivo(estado)) continue;
@@ -135,13 +158,17 @@ export default function MantenimientoPage() {
         }
 
         if (cuota.origen_cuota === 'carga_inicial') {
+          if (!('compra_cuota_inicial_id' in cuota)) {
+            cargasInicialesARevisar.push({ ...cuota, motivo_revision: 'No se encontró referencia directa a la carga inicial.' });
+            continue;
+          }
           if (!cuota.compra_cuota_inicial_id) {
-            compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Carga inicial sin referencia válida' });
+            cargasInicialesARevisar.push({ ...cuota, motivo_revision: 'No se pudo validar la carga inicial asociada.' });
             continue;
           }
           const compraInicial = cuota.compra_inicial ?? comprasIniciales.get(cuota.compra_cuota_inicial_id);
           if (!compraInicial) {
-            compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Carga inicial no encontrada' });
+            cargasInicialesARevisar.push({ ...cuota, motivo_revision: 'No se pudo validar la carga inicial asociada.' });
             continue;
           }
           if (!esCargaInicialActiva(compraInicial)) {
@@ -169,36 +196,43 @@ export default function MantenimientoPage() {
         }
       }
     });
-    safePushSeccion('gastos de tarjeta sin compromiso', () => {
-      void gastosTarjeta.length;
+    let gastosSinCompromiso: AnyObj[] = [];
+    safePushSeccion('gastosSinCompromiso', 'gastos de tarjeta sin compromiso', () => {
+      gastosSinCompromiso = gastosTarjeta.filter((g) => !cuotas.some((c) => c.gasto_id === g.id && !ESTADOS_COMPROMISO_INACTIVO.has(String(c.estado ?? '').toLowerCase())));
     });
-
-    const gastosSinCompromiso = gastosTarjeta.filter((g) => !cuotas.some((c) => c.gasto_id === g.id && !ESTADOS_COMPROMISO_INACTIVO.has(String(c.estado ?? '').toLowerCase())));
-
-    const mapaDup = new Map<string, CalendarioTarjetaDB[]>();
-    calendarios.forEach((c) => {
-      const key = `${c.cuenta_tarjeta_id}::${c.periodo_resumen}`;
-      mapaDup.set(key, [...(mapaDup.get(key) ?? []), c]);
+    const duplicadosCalendario: { key: string; items: CalendarioTarjetaDB[] }[] = [];
+    safePushSeccion('duplicadosCalendario', 'calendarios duplicados', () => {
+      const mapaDup = new Map<string, CalendarioTarjetaDB[]>();
+      calendarios.forEach((c) => {
+        const key = `${c.cuenta_tarjeta_id}::${c.periodo_resumen}`;
+        mapaDup.set(key, [...(mapaDup.get(key) ?? []), c]);
+      });
+      duplicadosCalendario.push(...Array.from(mapaDup.entries()).filter(([, items]) => items.length > 1).map(([key, items]) => ({ key, items })));
     });
-    const duplicadosCalendario = Array.from(mapaDup.entries()).filter(([, items]) => items.length > 1).map(([key, items]) => ({ key, items }));
-
-    const keysGasto = new Set(gastosTarjeta.map((g) => `${g.cuenta_tarjeta_id}::${estimarPeriodoResumenYPago(g.fecha_gasto, g.cuenta?.dia_cierre_habitual, g.cuenta?.dias_hasta_vencimiento).periodo_resumen}`));
-    const keysCuota = new Set(compromisosSinCalendario.concat(cuotas.filter((c) => esCompromisoActivo(c.estado))).map((c) => `${c.cuenta_tarjeta_id}::${c.periodo_resumen_faltante ?? c.periodo_pago_estimado}`));
-    const calendariosSinUso = calendarios.filter((c) => !keysGasto.has(`${c.cuenta_tarjeta_id}::${c.periodo_resumen}`) && !keysCuota.has(`${c.cuenta_tarjeta_id}::${c.periodo_resumen}`));
-
-    const sospechosos = new Map<string, AnyObj[]>();
-    gastosTarjeta.forEach((g) => {
-      const key = `${g.fecha_gasto}|${(g.establecimiento ?? '').trim().toLowerCase()}|${g.monto}|${g.persona_id}|${g.cuenta_tarjeta_id}`;
-      sospechosos.set(key, [...(sospechosos.get(key) ?? []), g]);
+    const calendariosSinUso: AnyObj[] = [];
+    safePushSeccion('calendariosSinUso', 'calendarios sin uso', () => {
+      const keysGasto = new Set(gastosTarjeta.map((g) => `${g.cuenta_tarjeta_id}::${estimarPeriodoResumenYPago(g.fecha_gasto, g.cuenta?.dia_cierre_habitual, g.cuenta?.dias_hasta_vencimiento).periodo_resumen}`));
+      const keysCuota = new Set(compromisosSinCalendario.concat(cuotas.filter((c) => esCompromisoActivo(c.estado))).map((c) => `${c.cuenta_tarjeta_id}::${c.periodo_resumen_faltante ?? c.periodo_pago_estimado}`));
+      calendariosSinUso.push(...calendarios.filter((c) => !keysGasto.has(`${c.cuenta_tarjeta_id}::${c.periodo_resumen}`) && !keysCuota.has(`${c.cuenta_tarjeta_id}::${c.periodo_resumen}`)));
     });
-    const gastosDuplicados = Array.from(sospechosos.entries()).filter(([, items]) => items.length > 1).map(([key, items]) => ({ key, items }));
+    const gastosDuplicados: { key: string; items: AnyObj[] }[] = [];
+    safePushSeccion('gastosDuplicados', 'gastos duplicados sospechosos', () => {
+      const sospechosos = new Map<string, AnyObj[]>();
+      gastosTarjeta.forEach((g) => {
+        const key = `${g.fecha_gasto}|${(g.establecimiento ?? '').trim().toLowerCase()}|${g.monto}|${g.persona_id}|${g.cuenta_tarjeta_id}`;
+        sospechosos.set(key, [...(sospechosos.get(key) ?? []), g]);
+      });
+      gastosDuplicados.push(...Array.from(sospechosos.entries()).filter(([, items]) => items.length > 1).map(([key, items]) => ({ key, items })));
+    });
 
     const nuevo = { gastosSinCompromiso, compromisosSinCalendario, cargasInicialesARevisar, compromisosHuerfanosAnulados, duplicadosCalendario, calendariosSinUso, gastosDuplicados, compromisosCancelados };
+    setErroresDiagnostico(erroresBase);
     setData(nuevo);
     if (cardSeleccionada && (nuevo[cardSeleccionada] as AnyObj[]).length === 0) setCardSeleccionada(null);
     const total = Object.values(nuevo).reduce((acc, v) => acc + v.length, 0);
-    if (seccionesConAdvertencias.length > 0) {
-      setMensaje(`Diagnóstico completado con advertencias. Secciones con error: ${seccionesConAdvertencias.join(', ')}.`);
+    const totalErrores = Object.keys(erroresBase).length;
+    if (totalErrores > 0) {
+      setMensaje(totalErrores >= 8 ? 'No se pudo completar una o más secciones del diagnóstico.' : 'Diagnóstico completado con errores.');
     } else {
       setMensaje(total === 0 ? 'No se detectaron inconsistencias.' : 'Diagnóstico completado.');
     }
@@ -266,21 +300,21 @@ export default function MantenimientoPage() {
   async function repararSeguro() { for (const c of data.compromisosSinCalendario) await regenerarCalendario(c); for (const g of data.duplicadosCalendario) await consolidarGrupo(g); setMensaje('Reparación automática segura finalizada: se regeneraron calendarios faltantes y se consolidaron duplicados claros.'); await diagnosticar(); }
 
   const cards = useMemo(() => [
-    { key: 'gastosSinCompromiso' as const, titulo: 'Gastos de tarjeta sin compromiso', valor: data.gastosSinCompromiso.length },
-    { key: 'compromisosSinCalendario' as const, titulo: 'Compromisos sin calendario', valor: data.compromisosSinCalendario.length },
-    { key: 'cargasInicialesARevisar' as const, titulo: 'Cargas iniciales a revisar', valor: data.cargasInicialesARevisar.length },
-    { key: 'compromisosHuerfanosAnulados' as const, titulo: 'Compromisos huérfanos/anulados', valor: data.compromisosHuerfanosAnulados.length },
-    { key: 'duplicadosCalendario' as const, titulo: 'Calendarios duplicados', valor: data.duplicadosCalendario.length },
-    { key: 'calendariosSinUso' as const, titulo: 'Calendarios sin uso', valor: data.calendariosSinUso.length },
-    { key: 'gastosDuplicados' as const, titulo: 'Gastos duplicados sospechosos', valor: data.gastosDuplicados.length },
-    { key: 'compromisosCancelados' as const, titulo: 'Compromisos cancelados/anulados', valor: data.compromisosCancelados.length },
-  ], [data]);
+    { key: 'gastosSinCompromiso' as const, titulo: 'Gastos de tarjeta sin compromiso', valor: data.gastosSinCompromiso.length, error: erroresDiagnostico.gastosSinCompromiso },
+    { key: 'compromisosSinCalendario' as const, titulo: 'Compromisos sin calendario', valor: data.compromisosSinCalendario.length, error: erroresDiagnostico.compromisosSinCalendario },
+    { key: 'cargasInicialesARevisar' as const, titulo: 'Cargas iniciales a revisar', valor: data.cargasInicialesARevisar.length, error: erroresDiagnostico.cargasInicialesARevisar },
+    { key: 'compromisosHuerfanosAnulados' as const, titulo: 'Compromisos huérfanos/anulados', valor: data.compromisosHuerfanosAnulados.length, error: erroresDiagnostico.compromisosHuerfanosAnulados },
+    { key: 'duplicadosCalendario' as const, titulo: 'Calendarios duplicados', valor: data.duplicadosCalendario.length, error: erroresDiagnostico.duplicadosCalendario },
+    { key: 'calendariosSinUso' as const, titulo: 'Calendarios sin uso', valor: data.calendariosSinUso.length, error: erroresDiagnostico.calendariosSinUso },
+    { key: 'gastosDuplicados' as const, titulo: 'Gastos duplicados sospechosos', valor: data.gastosDuplicados.length, error: erroresDiagnostico.gastosDuplicados },
+    { key: 'compromisosCancelados' as const, titulo: 'Compromisos cancelados/anulados', valor: data.compromisosCancelados.length, error: erroresDiagnostico.compromisosCancelados },
+  ], [data, erroresDiagnostico]);
 
   return <main className="space-y-4 p-4 md:p-6">{/* UI abreviada por cambios */}
     <h1 className="text-2xl font-semibold">Mantenimiento</h1>
     <div className="flex flex-wrap gap-2"><button onClick={() => void diagnosticar()} disabled={cargando} className="rounded-lg bg-slate-900 px-4 py-2 text-white">{cargando ? 'Ejecutando...' : 'Ejecutar diagnóstico'}</button><button onClick={() => void repararSeguro()} className="rounded-lg border px-4 py-2">Reparar automáticamente lo seguro</button></div>
     {mensaje && <p className="text-sm text-slate-600">{mensaje}</p>}
-    <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{cards.map((c) => <button key={c.key} onClick={() => c.valor > 0 && setCardSeleccionada(c.key)} className={`rounded-xl border bg-white p-4 text-left ${c.valor > 0 ? 'cursor-pointer hover:border-slate-400' : 'cursor-default opacity-80'} ${cardSeleccionada === c.key ? 'border-slate-900 ring-1 ring-slate-900' : ''}`}><p className="text-xs text-slate-500">{c.titulo}</p><p className="text-2xl font-bold">{c.valor}</p></button>)}</section>
+    <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{cards.map((c) => <div key={c.key} className={`rounded-xl border bg-white p-4 text-left ${cardSeleccionada === c.key ? 'border-slate-900 ring-1 ring-slate-900' : ''}`}><p className="text-xs text-slate-500">{c.titulo}</p>{c.error ? <><p className="mt-1 text-sm font-semibold text-rose-700">Error al diagnosticar</p><p className="mt-1 text-xs text-slate-600">Ver error abajo.</p><div className="mt-2 flex gap-2">{esDesarrollo && <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => void navigator.clipboard.writeText(`Error en ${c.titulo}: ${c.error}`)}>Copiar error</button>}<button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => setCardSeleccionada(c.key)}>Ver error</button></div>{cardSeleccionada === c.key && esDesarrollo && <p className="mt-2 break-words rounded bg-rose-50 p-2 text-xs text-rose-800">Error en {c.titulo}: {c.error}</p>}</> : <button onClick={() => c.valor > 0 && setCardSeleccionada(c.key)} className={`${c.valor > 0 ? 'cursor-pointer hover:border-slate-400' : 'cursor-default opacity-80'}`}><p className="text-2xl font-bold">{c.valor}</p></button>}</div>)}</section>
     {cardSeleccionada === 'compromisosSinCalendario' && <section className="space-y-2 rounded-xl border bg-white p-4"><p className="text-sm text-slate-600">Estos compromisos activos sí se pueden reparar regenerando calendario de resumen. El período de pago se muestra solo como referencia de flujo.</p>{data.compromisosSinCalendario.map((c) => <div key={c.id} className="rounded-lg border p-3 text-sm md:grid md:grid-cols-10 md:gap-2"><span>{c.cuenta?.nombre_cuenta}</span><span>{c.gasto?.fecha_gasto ?? '-'}</span><span>{c.periodo_resumen_faltante ?? '-'}</span><span>{c.periodo_pago_flujo ?? c.periodo_pago_estimado}</span><span>{c.establecimiento}</span><span>{c.monto_cuota}</span><span>{c.persona?.nombre}</span><span>{c.origen_cuota === 'carga_inicial' ? 'Carga inicial' : c.origen_cuota}</span><span>{c.estado}</span><div className="flex gap-2"><button onClick={() => void regenerarCalendario(c)} className="rounded border px-2">Regenerar calendario</button>{c.origen_cuota === 'carga_inicial' ? (c.compra_cuota_inicial_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleCargaInicialDesdeCuota(c)}>Ver carga inicial</button> : <span className="text-xs text-slate-500">Sin referencia de carga inicial</span>) : (c.gasto_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleGastoDesdeCuota(c)}>Ver gasto</button> : <span className="text-xs text-slate-500">Gasto no disponible</span>)}</div></div>)}</section>}
     {cardSeleccionada === 'cargasInicialesARevisar' && <section className="space-y-2 rounded-xl border bg-white p-4"><p className="text-sm text-slate-600">Esta carga inicial no tiene un período de resumen claro. Revisá la carga inicial manualmente.</p>{data.cargasInicialesARevisar.map((c) => <div key={c.id} className="rounded-lg border p-3 text-sm md:grid md:grid-cols-9 md:gap-2"><span>{c.cuenta?.nombre_cuenta}</span><span>{c.establecimiento}</span><span>{c.monto_cuota}</span><span>{c.persona?.nombre}</span><span>{c.periodo_pago_estimado ?? '-'}</span><span>Carga inicial</span><span>{c.estado}</span><span className="font-medium text-amber-700">{c.motivo_revision}</span><div className="flex gap-2"><button onClick={() => void marcarCompromisoCancelado(c)} className="rounded border px-2">Marcar como cancelado</button>{c.compra_cuota_inicial_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleCargaInicialDesdeCuota(c)}>Ver carga inicial</button> : <span className="text-xs text-slate-500">Sin referencia válida</span>}</div></div>)}</section>}
     {cardSeleccionada === 'compromisosHuerfanosAnulados' && <section className="space-y-2 rounded-xl border bg-white p-4"><p className="text-sm text-slate-600">Estos compromisos no tienen un gasto activo asociado. No se regenerará calendario para ellos.</p>{data.compromisosHuerfanosAnulados.map((c) => <div key={c.id} className="rounded-lg border p-3 text-sm md:grid md:grid-cols-10 md:gap-2"><span>{c.cuenta?.nombre_cuenta}</span><span>{c.periodo_pago_estimado}</span><span>{c.fecha_estimada_pago ?? '-'}</span><span>{c.establecimiento}</span><span>{c.monto_cuota}</span><span>{c.persona?.nombre}</span><span>{c.origen_cuota === 'carga_inicial' ? 'Carga inicial' : c.origen_cuota}</span><span>{c.estado}</span><span className="font-medium text-amber-700">{c.motivo_huerfano}</span><div className="flex gap-2"><button onClick={() => void marcarCompromisoCancelado(c)} className="rounded border px-2">Marcar como cancelado</button>{c.origen_cuota === 'carga_inicial' ? (c.compra_cuota_inicial_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleCargaInicialDesdeCuota(c)}>Ver carga inicial</button> : <span className="text-xs text-slate-500">Sin referencia de carga inicial</span>) : (c.gasto_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleGastoDesdeCuota(c)}>Ver detalle</button> : <span className="text-xs text-slate-500">Gasto no disponible</span>)}</div></div>)}</section>}
