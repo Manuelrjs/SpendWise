@@ -9,6 +9,7 @@ type AnyObj = Record<string, any>;
 type DiagnosticoKey =
   | 'gastosSinCompromiso'
   | 'compromisosSinCalendario'
+  | 'cargasInicialesARevisar'
   | 'compromisosHuerfanosAnulados'
   | 'duplicadosCalendario'
   | 'calendariosSinUso'
@@ -40,6 +41,7 @@ export default function MantenimientoPage() {
   const [data, setData] = useState({
     gastosSinCompromiso: [] as AnyObj[],
     compromisosSinCalendario: [] as AnyObj[],
+    cargasInicialesARevisar: [] as (AnyObj & { motivo_revision: string })[],
     compromisosHuerfanosAnulados: [] as (AnyObj & { motivo_huerfano: string })[],
     duplicadosCalendario: [] as { key: string; items: CalendarioTarjetaDB[] }[],
     calendariosSinUso: [] as AnyObj[],
@@ -89,71 +91,87 @@ export default function MantenimientoPage() {
 
     const compromisosHuerfanosAnulados: (AnyObj & { motivo_huerfano: string })[] = [];
     const compromisosSinCalendario: AnyObj[] = [];
+    const cargasInicialesARevisar: (AnyObj & { motivo_revision: string })[] = [];
+    const seccionesConAdvertencias: string[] = [];
+    const safePushSeccion = (seccion: string, fn: () => void) => {
+      try {
+        fn();
+      } catch (error) {
+        seccionesConAdvertencias.push(seccion);
+        console.error(`Error en diagnóstico (${seccion})`, error);
+      }
+    };
 
-    for (const cuota of cuotas) {
-      const estado = String(cuota.estado ?? '').toLowerCase();
-      if (ESTADOS_COMPROMISO_NO_REPARABLE.has(estado) || !esCompromisoActivo(estado)) continue;
+    safePushSeccion('compromisos cancelados/anulados', () => {
+      // calculado arriba por simple filtro, pero lo encapsulamos para robustez conceptual.
+      void compromisosCancelados.length;
+    });
+    safePushSeccion('compromisos sin calendario', () => {
+      for (const cuota of cuotas) {
+        const estado = String(cuota.estado ?? '').toLowerCase();
+        if (ESTADOS_COMPROMISO_NO_REPARABLE.has(estado) || !esCompromisoActivo(estado)) continue;
 
-      if (cuota.origen_cuota === 'gasto_nuevo') {
-        if (!cuota.gasto_id) {
-          compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Sin gasto asociado' });
+        if (cuota.origen_cuota === 'gasto_nuevo') {
+          if (!cuota.gasto_id) {
+            compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Sin gasto asociado' });
+            continue;
+          }
+          const gasto = cuota.gasto ?? gastosPorId.get(cuota.gasto_id);
+          if (!gasto) {
+            compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Gasto no encontrado' });
+            continue;
+          }
+          if (esGastoAnulado(gasto.estado_registro)) {
+            compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Gasto anulado' });
+            continue;
+          }
+          const estimado = estimarPeriodoResumenYPago(gasto.fecha_gasto, cuota.cuenta?.dia_cierre_habitual ?? null, cuota.cuenta?.dias_hasta_vencimiento ?? null);
+          const periodoResumenFaltante = estimado.periodo_resumen;
+          const tieneCalendario = calendarios.some((cal) => cal.cuenta_tarjeta_id === cuota.cuenta_tarjeta_id && cal.periodo_resumen === periodoResumenFaltante);
+          if (!tieneCalendario) {
+            compromisosSinCalendario.push({ ...cuota, periodo_resumen_faltante: periodoResumenFaltante, periodo_pago_flujo: estimado.periodo_pago_estimado, origen_visual: 'gasto_nuevo' });
+          }
           continue;
         }
-        const gasto = cuota.gasto ?? gastosPorId.get(cuota.gasto_id);
-        if (!gasto) {
-          compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Gasto no encontrado' });
-          continue;
-        }
-        if (esGastoAnulado(gasto.estado_registro)) {
-          compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Gasto anulado' });
+
+        if (cuota.origen_cuota === 'carga_inicial') {
+          if (!cuota.compra_cuota_inicial_id) {
+            compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Carga inicial sin referencia válida' });
+            continue;
+          }
+          const compraInicial = cuota.compra_inicial ?? comprasIniciales.get(cuota.compra_cuota_inicial_id);
+          if (!compraInicial) {
+            compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Carga inicial no encontrada' });
+            continue;
+          }
+          if (!esCargaInicialActiva(compraInicial)) {
+            compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Carga inicial anulada' });
+            continue;
+          }
+          const periodoResumenExplicito = String(cuota.periodo_resumen ?? compraInicial.periodo_resumen ?? '').slice(0, 7);
+          const periodoPago = String(cuota.periodo_pago_estimado ?? '').slice(0, 7);
+          const periodoObjetivo = periodoResumenExplicito || periodoPago;
+          if (!periodoObjetivo || !/^\d{4}-\d{2}$/.test(periodoObjetivo)) {
+            cargasInicialesARevisar.push({ ...cuota, motivo_revision: 'No se pudo inferir período de resumen' });
+            continue;
+          }
+          const tieneCalendario = calendarios.some((cal) => cal.cuenta_tarjeta_id === cuota.cuenta_tarjeta_id && cal.periodo_resumen === periodoObjetivo);
+          if (!tieneCalendario) {
+            compromisosSinCalendario.push({
+              ...cuota,
+              periodo_resumen_faltante: periodoObjetivo,
+              periodo_pago_flujo: periodoPago || periodoObjetivo,
+              origen_visual: 'carga_inicial',
+              modo_regeneracion: periodoResumenExplicito ? 'resumen_explicito' : 'periodo_pago',
+            });
+          }
           continue;
         }
       }
-
-      if (cuota.origen_cuota === 'carga_inicial') {
-        const compraInicial = cuota.compra_inicial ?? (cuota.compra_cuota_inicial_id ? comprasIniciales.get(cuota.compra_cuota_inicial_id) : null);
-        if (!cuota.compra_cuota_inicial_id) {
-          compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Sin referencia de carga inicial' });
-          continue;
-        }
-        if (!compraInicial) {
-          compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Carga inicial no encontrada' });
-          continue;
-        }
-        if (!esCargaInicialActiva(compraInicial)) {
-          compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'Carga inicial anulada' });
-          continue;
-        }
-      }
-
-      let periodoResumenFaltante = cuota.periodo_pago_estimado;
-      let periodoPagoFlujo = cuota.periodo_pago_estimado;
-
-      if (cuota.origen_cuota === 'gasto_nuevo') {
-        const gasto = cuota.gasto ?? gastosPorId.get(cuota.gasto_id);
-        const estimado = estimarPeriodoResumenYPago(gasto.fecha_gasto, cuota.cuenta?.dia_cierre_habitual ?? null, cuota.cuenta?.dias_hasta_vencimiento ?? null);
-        periodoResumenFaltante = estimado.periodo_resumen;
-        periodoPagoFlujo = estimado.periodo_pago_estimado;
-      }
-
-      if (cuota.origen_cuota === 'carga_inicial') {
-        const compraInicial = cuota.compra_inicial ?? (cuota.compra_cuota_inicial_id ? comprasIniciales.get(cuota.compra_cuota_inicial_id) : null);
-        const periodoCompraInicial = String(compraInicial?.periodo_inicio ?? '').slice(0, 7);
-        if (periodoCompraInicial) {
-          periodoResumenFaltante = periodoCompraInicial;
-          periodoPagoFlujo = periodoCompraInicial;
-        } else if (cuota.periodo_pago_estimado) {
-          periodoResumenFaltante = cuota.periodo_pago_estimado;
-          periodoPagoFlujo = cuota.periodo_pago_estimado;
-        } else {
-          compromisosHuerfanosAnulados.push({ ...cuota, motivo_huerfano: 'No se pudo inferir el período de resumen de la carga inicial' });
-          continue;
-        }
-      }
-
-      const tieneCalendario = calendarios.some((cal) => cal.cuenta_tarjeta_id === cuota.cuenta_tarjeta_id && cal.periodo_resumen === periodoResumenFaltante);
-      if (!tieneCalendario) compromisosSinCalendario.push({ ...cuota, periodo_resumen_faltante: periodoResumenFaltante, periodo_pago_flujo: periodoPagoFlujo });
-    }
+    });
+    safePushSeccion('gastos de tarjeta sin compromiso', () => {
+      void gastosTarjeta.length;
+    });
 
     const gastosSinCompromiso = gastosTarjeta.filter((g) => !cuotas.some((c) => c.gasto_id === g.id && !ESTADOS_COMPROMISO_INACTIVO.has(String(c.estado ?? '').toLowerCase())));
 
@@ -175,11 +193,15 @@ export default function MantenimientoPage() {
     });
     const gastosDuplicados = Array.from(sospechosos.entries()).filter(([, items]) => items.length > 1).map(([key, items]) => ({ key, items }));
 
-    const nuevo = { gastosSinCompromiso, compromisosSinCalendario, compromisosHuerfanosAnulados, duplicadosCalendario, calendariosSinUso, gastosDuplicados, compromisosCancelados };
+    const nuevo = { gastosSinCompromiso, compromisosSinCalendario, cargasInicialesARevisar, compromisosHuerfanosAnulados, duplicadosCalendario, calendariosSinUso, gastosDuplicados, compromisosCancelados };
     setData(nuevo);
     if (cardSeleccionada && (nuevo[cardSeleccionada] as AnyObj[]).length === 0) setCardSeleccionada(null);
     const total = Object.values(nuevo).reduce((acc, v) => acc + v.length, 0);
-    setMensaje(total === 0 ? 'No se detectaron inconsistencias.' : 'Diagnóstico completado.');
+    if (seccionesConAdvertencias.length > 0) {
+      setMensaje(`Diagnóstico completado con advertencias. Secciones con error: ${seccionesConAdvertencias.join(', ')}.`);
+    } else {
+      setMensaje(total === 0 ? 'No se detectaron inconsistencias.' : 'Diagnóstico completado.');
+    }
     setCargando(false);
   }
 
@@ -224,7 +246,10 @@ export default function MantenimientoPage() {
         return;
       }
       await obtenerOCrearCalendarioEstimado({ supabase, cuenta: { id: c.cuenta_tarjeta_id, nombre_cuenta: c.cuenta?.nombre_cuenta, dia_cierre_habitual: c.cuenta?.dia_cierre_habitual ?? null, dias_hasta_vencimiento: c.cuenta?.dias_hasta_vencimiento ?? null }, periodo: periodoResumen, contexto: 'calendario' });
-      setMensaje(`Calendario regenerado correctamente para período resumen ${periodoResumen}.`);
+      const observacionCargaInicial = c.modo_regeneracion === 'periodo_pago'
+        ? `Calendario regenerado para período de pago de carga inicial (${periodoResumen}).`
+        : `Calendario regenerado correctamente para período resumen ${periodoResumen}.`;
+      setMensaje(observacionCargaInicial);
       await diagnosticar();
       return;
     }
@@ -243,6 +268,7 @@ export default function MantenimientoPage() {
   const cards = useMemo(() => [
     { key: 'gastosSinCompromiso' as const, titulo: 'Gastos de tarjeta sin compromiso', valor: data.gastosSinCompromiso.length },
     { key: 'compromisosSinCalendario' as const, titulo: 'Compromisos sin calendario', valor: data.compromisosSinCalendario.length },
+    { key: 'cargasInicialesARevisar' as const, titulo: 'Cargas iniciales a revisar', valor: data.cargasInicialesARevisar.length },
     { key: 'compromisosHuerfanosAnulados' as const, titulo: 'Compromisos huérfanos/anulados', valor: data.compromisosHuerfanosAnulados.length },
     { key: 'duplicadosCalendario' as const, titulo: 'Calendarios duplicados', valor: data.duplicadosCalendario.length },
     { key: 'calendariosSinUso' as const, titulo: 'Calendarios sin uso', valor: data.calendariosSinUso.length },
@@ -256,6 +282,7 @@ export default function MantenimientoPage() {
     {mensaje && <p className="text-sm text-slate-600">{mensaje}</p>}
     <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{cards.map((c) => <button key={c.key} onClick={() => c.valor > 0 && setCardSeleccionada(c.key)} className={`rounded-xl border bg-white p-4 text-left ${c.valor > 0 ? 'cursor-pointer hover:border-slate-400' : 'cursor-default opacity-80'} ${cardSeleccionada === c.key ? 'border-slate-900 ring-1 ring-slate-900' : ''}`}><p className="text-xs text-slate-500">{c.titulo}</p><p className="text-2xl font-bold">{c.valor}</p></button>)}</section>
     {cardSeleccionada === 'compromisosSinCalendario' && <section className="space-y-2 rounded-xl border bg-white p-4"><p className="text-sm text-slate-600">Estos compromisos activos sí se pueden reparar regenerando calendario de resumen. El período de pago se muestra solo como referencia de flujo.</p>{data.compromisosSinCalendario.map((c) => <div key={c.id} className="rounded-lg border p-3 text-sm md:grid md:grid-cols-10 md:gap-2"><span>{c.cuenta?.nombre_cuenta}</span><span>{c.gasto?.fecha_gasto ?? '-'}</span><span>{c.periodo_resumen_faltante ?? '-'}</span><span>{c.periodo_pago_flujo ?? c.periodo_pago_estimado}</span><span>{c.establecimiento}</span><span>{c.monto_cuota}</span><span>{c.persona?.nombre}</span><span>{c.origen_cuota === 'carga_inicial' ? 'Carga inicial' : c.origen_cuota}</span><span>{c.estado}</span><div className="flex gap-2"><button onClick={() => void regenerarCalendario(c)} className="rounded border px-2">Regenerar calendario</button>{c.origen_cuota === 'carga_inicial' ? (c.compra_cuota_inicial_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleCargaInicialDesdeCuota(c)}>Ver carga inicial</button> : <span className="text-xs text-slate-500">Sin referencia de carga inicial</span>) : (c.gasto_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleGastoDesdeCuota(c)}>Ver gasto</button> : <span className="text-xs text-slate-500">Gasto no disponible</span>)}</div></div>)}</section>}
+    {cardSeleccionada === 'cargasInicialesARevisar' && <section className="space-y-2 rounded-xl border bg-white p-4"><p className="text-sm text-slate-600">Esta carga inicial no tiene un período de resumen claro. Revisá la carga inicial manualmente.</p>{data.cargasInicialesARevisar.map((c) => <div key={c.id} className="rounded-lg border p-3 text-sm md:grid md:grid-cols-9 md:gap-2"><span>{c.cuenta?.nombre_cuenta}</span><span>{c.establecimiento}</span><span>{c.monto_cuota}</span><span>{c.persona?.nombre}</span><span>{c.periodo_pago_estimado ?? '-'}</span><span>Carga inicial</span><span>{c.estado}</span><span className="font-medium text-amber-700">{c.motivo_revision}</span><div className="flex gap-2"><button onClick={() => void marcarCompromisoCancelado(c)} className="rounded border px-2">Marcar como cancelado</button>{c.compra_cuota_inicial_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleCargaInicialDesdeCuota(c)}>Ver carga inicial</button> : <span className="text-xs text-slate-500">Sin referencia válida</span>}</div></div>)}</section>}
     {cardSeleccionada === 'compromisosHuerfanosAnulados' && <section className="space-y-2 rounded-xl border bg-white p-4"><p className="text-sm text-slate-600">Estos compromisos no tienen un gasto activo asociado. No se regenerará calendario para ellos.</p>{data.compromisosHuerfanosAnulados.map((c) => <div key={c.id} className="rounded-lg border p-3 text-sm md:grid md:grid-cols-10 md:gap-2"><span>{c.cuenta?.nombre_cuenta}</span><span>{c.periodo_pago_estimado}</span><span>{c.fecha_estimada_pago ?? '-'}</span><span>{c.establecimiento}</span><span>{c.monto_cuota}</span><span>{c.persona?.nombre}</span><span>{c.origen_cuota === 'carga_inicial' ? 'Carga inicial' : c.origen_cuota}</span><span>{c.estado}</span><span className="font-medium text-amber-700">{c.motivo_huerfano}</span><div className="flex gap-2"><button onClick={() => void marcarCompromisoCancelado(c)} className="rounded border px-2">Marcar como cancelado</button>{c.origen_cuota === 'carga_inicial' ? (c.compra_cuota_inicial_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleCargaInicialDesdeCuota(c)}>Ver carga inicial</button> : <span className="text-xs text-slate-500">Sin referencia de carga inicial</span>) : (c.gasto_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleGastoDesdeCuota(c)}>Ver detalle</button> : <span className="text-xs text-slate-500">Gasto no disponible</span>)}</div></div>)}</section>}
     {gastoDetalle && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="w-full max-w-xl rounded-xl bg-white p-4"><div className="mb-3 flex items-center justify-between"><h3 className="text-lg font-semibold">{gastoDetalle.tipo_detalle === 'carga_inicial' ? 'Detalle de carga inicial' : 'Detalle de gasto'}</h3><button className="rounded border px-2 py-1 text-sm" onClick={() => setGastoDetalle(null)}>Cerrar</button></div><div className="grid grid-cols-2 gap-2 text-sm"><span>Fecha</span><span>{gastoDetalle.fecha_gasto ?? '-'}</span><span>Establecimiento</span><span>{gastoDetalle.establecimiento ?? '-'}</span><span>Monto</span><span>{gastoDetalle.monto ?? '-'}</span><span>Moneda</span><span>{gastoDetalle.moneda ?? '-'}</span><span>Persona</span><span>{gastoDetalle.persona?.nombre ?? '-'}</span><span>Categoría</span><span>{gastoDetalle.categoria?.nombre ?? '-'}</span><span>Medio de pago</span><span>{gastoDetalle.medio_pago?.tipo ?? '-'}</span><span>Cuenta de tarjeta</span><span>{gastoDetalle.cuenta?.nombre_cuenta ?? '-'}</span><span>Tarjeta física</span><span>{gastoDetalle.tarjeta?.alias ?? '-'}</span><span>Estado</span><span>{gastoDetalle.estado_registro ?? '-'}</span><span>Observaciones</span><span>{gastoDetalle.observaciones ?? '-'}</span><span>Comprobante</span><span>{gastoDetalle.comprobante?.id ? 'Sí' : 'No'}</span></div></div></div>}
   </main>;
