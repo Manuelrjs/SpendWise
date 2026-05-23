@@ -5,9 +5,9 @@ import { supabase } from '@/lib/supabase/client';
 import { MENSAJE_ERROR_BUCKET_COMPROBANTES, normalizarNombreArchivo, validarComprobante } from '@/lib/comprobantes';
 import { DatosComprobanteSugeridos, extraerDatosComprobante } from '@/lib/ia/extraer-comprobante';
 import {
+  calcularPeriodoResumenYVencimiento,
   calcularPeriodoTarjeta,
   CalendarioTarjeta,
-  formatearPeriodoDesdeFecha,
   sumarMesesPeriodo,
 } from '@/utils/tarjetas';
 import { obtenerOCrearCalendarioEstimado } from '@/lib/calendario-tarjetas';
@@ -292,10 +292,20 @@ export default function Page() {
         const cuenta = cuentas.find((c) => c.id === formulario.cuenta_tarjeta_id);
         if (!cuenta) throw new Error('No se encontró la cuenta de tarjeta seleccionada.');
 
-        const periodo = formatearPeriodoDesdeFecha(formulario.fecha_gasto);
-        const calendarioBase = await asegurarCalendario(cuenta, periodo);
+        if (cuenta.dia_cierre_habitual === null || cuenta.dias_hasta_vencimiento === null) {
+          throw new Error('Esta cuenta no tiene configuración habitual de cierre/vencimiento. Completala en Tarjetas o cargá el calendario manualmente.');
+        }
+        const calculoBase = calcularPeriodoResumenYVencimiento({
+          fecha_gasto: formulario.fecha_gasto,
+          dia_cierre_habitual: cuenta.dia_cierre_habitual,
+          dias_hasta_vencimiento: cuenta.dias_hasta_vencimiento,
+        });
+        const calendarioBase = await asegurarCalendario(cuenta, calculoBase.periodo_resumen);
         usaronEstimados ||= calendarioBase.generado || calendarioBase.calendario.estado_calendario === 'estimado';
         const resultado = calcularPeriodoTarjeta({ fecha_gasto: formulario.fecha_gasto, cuenta_tarjeta_id: cuenta.id, calendarios: [...calendarios, calendarioBase.calendario] });
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[tarjeta][calculo]', { fecha_gasto: formulario.fecha_gasto, dia_cierre_habitual: cuenta.dia_cierre_habitual, dias_hasta_vencimiento: cuenta.dias_hasta_vencimiento, periodo_resumen: resultado.periodo_resumen, fecha_cierre: resultado.fecha_cierre, fecha_vencimiento: resultado.fecha_vencimiento, periodo_pago_estimado: resultado.periodo_pago });
+        }
 
         for (let i = 0; i < formulario.cantidad_cuotas; i += 1) {
           const periodoResumenCuota = i === 0 ? resultado.periodo_resumen : sumarMesesPeriodo(resultado.periodo_resumen, i);
