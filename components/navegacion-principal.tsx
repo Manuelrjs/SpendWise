@@ -12,6 +12,7 @@ const enlaces = [
   { href: '/configuracion/personas', etiqueta: 'Personas' },
   { href: '/configuracion/categorias', etiqueta: 'Categorías' },
   { href: '/configuracion/medios-pago', etiqueta: 'Medios de pago' },
+  { href: '/configuracion/mantenimiento', etiqueta: 'Mantenimiento' },
 ];
 
 export function NavegacionPrincipal() {
