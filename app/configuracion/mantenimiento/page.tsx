@@ -22,6 +22,7 @@ const ESTADOS_COMPROMISO_NO_REPARABLE = new Set([...ESTADOS_COMPROMISO_INACTIVO,
 const esGastoAnulado = (estadoRegistro: string | null | undefined) => String(estadoRegistro ?? '').toLowerCase() === 'anulado';
 const esGastoActivo = (estadoRegistro: string | null | undefined) => !esGastoAnulado(estadoRegistro);
 const esCompromisoActivo = (estado: string | null | undefined) => ESTADOS_COMPROMISO_ACTIVO.has(String(estado ?? '').toLowerCase());
+const periodoDesdeFecha = (fecha: string) => fecha.slice(0, 7);
 
 export default function MantenimientoPage() {
   const [cargando, setCargando] = useState(false);
@@ -38,10 +39,11 @@ export default function MantenimientoPage() {
     compromisosCancelados: [] as AnyObj[],
   });
 
-  const estimarPeriodo = (fecha: string, dia: number | null, dias: number | null) =>
-    !dia || dias === null
-      ? fecha.slice(0, 7)
-      : calcularPeriodoResumenYVencimiento({ fecha_gasto: fecha, dia_cierre_habitual: dia, dias_hasta_vencimiento: dias }).periodo_resumen;
+  const estimarPeriodoResumenYPago = (fecha: string, dia: number | null, dias: number | null) => {
+    if (!dia || dias === null) return { periodo_resumen: periodoDesdeFecha(fecha), periodo_pago_estimado: periodoDesdeFecha(fecha), fecha_cierre: null, fecha_vencimiento: null };
+    const calculo = calcularPeriodoResumenYVencimiento({ fecha_gasto: fecha, dia_cierre_habitual: dia, dias_hasta_vencimiento: dias });
+    return { periodo_resumen: calculo.periodo_resumen, periodo_pago_estimado: calculo.periodo_pago_estimado, fecha_cierre: calculo.fecha_cierre, fecha_vencimiento: calculo.fecha_vencimiento };
+  };
 
   async function diagnosticar() {
     setCargando(true);
@@ -113,8 +115,18 @@ export default function MantenimientoPage() {
         if (ESTADOS_COMPROMISO_INACTIVO.has(String(compraInicial.estado ?? '').toLowerCase())) continue;
       }
 
-      const tieneCalendario = calendarios.some((cal) => cal.cuenta_tarjeta_id === cuota.cuenta_tarjeta_id && cal.periodo_resumen === cuota.periodo_pago_estimado);
-      if (!tieneCalendario) compromisosSinCalendario.push(cuota);
+      let periodoResumenFaltante = cuota.periodo_pago_estimado;
+      let periodoPagoFlujo = cuota.periodo_pago_estimado;
+
+      if (cuota.origen_cuota === 'gasto_nuevo') {
+        const gasto = cuota.gasto ?? gastosPorId.get(cuota.gasto_id);
+        const estimado = estimarPeriodoResumenYPago(gasto.fecha_gasto, cuota.cuenta?.dia_cierre_habitual ?? null, cuota.cuenta?.dias_hasta_vencimiento ?? null);
+        periodoResumenFaltante = estimado.periodo_resumen;
+        periodoPagoFlujo = estimado.periodo_pago_estimado;
+      }
+
+      const tieneCalendario = calendarios.some((cal) => cal.cuenta_tarjeta_id === cuota.cuenta_tarjeta_id && cal.periodo_resumen === periodoResumenFaltante);
+      if (!tieneCalendario) compromisosSinCalendario.push({ ...cuota, periodo_resumen_faltante: periodoResumenFaltante, periodo_pago_flujo: periodoPagoFlujo });
     }
 
     const gastosSinCompromiso = gastosTarjeta.filter((g) => !cuotas.some((c) => c.gasto_id === g.id && !ESTADOS_COMPROMISO_INACTIVO.has(String(c.estado ?? '').toLowerCase())));
@@ -126,8 +138,8 @@ export default function MantenimientoPage() {
     });
     const duplicadosCalendario = Array.from(mapaDup.entries()).filter(([, items]) => items.length > 1).map(([key, items]) => ({ key, items }));
 
-    const keysGasto = new Set(gastosTarjeta.map((g) => `${g.cuenta_tarjeta_id}::${estimarPeriodo(g.fecha_gasto, g.cuenta?.dia_cierre_habitual, g.cuenta?.dias_hasta_vencimiento)}`));
-    const keysCuota = new Set(compromisosSinCalendario.concat(cuotas.filter((c) => esCompromisoActivo(c.estado))).map((c) => `${c.cuenta_tarjeta_id}::${c.periodo_pago_estimado}`));
+    const keysGasto = new Set(gastosTarjeta.map((g) => `${g.cuenta_tarjeta_id}::${estimarPeriodoResumenYPago(g.fecha_gasto, g.cuenta?.dia_cierre_habitual, g.cuenta?.dias_hasta_vencimiento).periodo_resumen}`));
+    const keysCuota = new Set(compromisosSinCalendario.concat(cuotas.filter((c) => esCompromisoActivo(c.estado))).map((c) => `${c.cuenta_tarjeta_id}::${c.periodo_resumen_faltante ?? c.periodo_pago_estimado}`));
     const calendariosSinUso = calendarios.filter((c) => !keysGasto.has(`${c.cuenta_tarjeta_id}::${c.periodo_resumen}`) && !keysCuota.has(`${c.cuenta_tarjeta_id}::${c.periodo_resumen}`));
 
     const sospechosos = new Map<string, AnyObj[]>();
@@ -151,7 +163,34 @@ export default function MantenimientoPage() {
     setMensaje('Compromiso marcado como cancelado.');
     await diagnosticar();
   }
-  async function regenerarCalendario(c: AnyObj) { await obtenerOCrearCalendarioEstimado({ supabase, cuenta: { id: c.cuenta_tarjeta_id, nombre_cuenta: c.cuenta?.nombre_cuenta, dia_cierre_habitual: c.cuenta?.dia_cierre_habitual ?? null, dias_hasta_vencimiento: c.cuenta?.dias_hasta_vencimiento ?? null }, periodo: c.periodo_pago_estimado, contexto: 'calendario' }); setMensaje('Calendario regenerado correctamente.'); await diagnosticar(); }
+  async function abrirDetalleGastoDesdeCuota(cuota: AnyObj) {
+    if (!cuota.gasto_id) return;
+    const { data: gasto, error } = await supabase
+      .from('gastos')
+      .select('id,fecha_gasto,establecimiento,monto,moneda,estado_registro,observaciones,persona:personas(nombre,apellido),categoria:categorias(nombre),cuenta:cuentas_tarjeta(nombre_cuenta),tarjeta:tarjetas_fisicas(alias,tipo,ultimos_4_digitos),medio_pago:medios_pago(tipo),comprobante:comprobantes(id)')
+      .eq('id', cuota.gasto_id)
+      .maybeSingle();
+    if (error || !gasto) {
+      setMensaje('No se pudo cargar el detalle completo del gasto.');
+      return;
+    }
+    setGastoDetalle(gasto);
+  }
+
+  async function regenerarCalendario(c: AnyObj) {
+    if (c.origen_cuota === 'carga_inicial') {
+      setMensaje('No se pudo inferir el período de resumen de esta carga inicial. Revisá la carga inicial manualmente.');
+      return;
+    }
+    if (!c.gasto?.fecha_gasto) {
+      setMensaje('No se encontró un gasto activo para regenerar calendario.');
+      return;
+    }
+    const calculo = estimarPeriodoResumenYPago(c.gasto.fecha_gasto, c.cuenta?.dia_cierre_habitual ?? null, c.cuenta?.dias_hasta_vencimiento ?? null);
+    await obtenerOCrearCalendarioEstimado({ supabase, cuenta: { id: c.cuenta_tarjeta_id, nombre_cuenta: c.cuenta?.nombre_cuenta, dia_cierre_habitual: c.cuenta?.dia_cierre_habitual ?? null, dias_hasta_vencimiento: c.cuenta?.dias_hasta_vencimiento ?? null }, periodo: calculo.periodo_resumen, contexto: 'calendario' });
+    setMensaje(`Calendario regenerado correctamente para período resumen ${calculo.periodo_resumen}.`);
+    await diagnosticar();
+  }
   async function consolidarGrupo(grupo: { items: CalendarioTarjetaDB[] }) { await consolidarDuplicadosCalendario(supabase, grupo.items); setMensaje('Duplicados consolidados.'); await diagnosticar(); }
   async function repararSeguro() { for (const c of data.compromisosSinCalendario) await regenerarCalendario(c); for (const g of data.duplicadosCalendario) await consolidarGrupo(g); setMensaje('Reparación automática segura finalizada: se regeneraron calendarios faltantes y se consolidaron duplicados claros.'); await diagnosticar(); }
 
@@ -170,8 +209,8 @@ export default function MantenimientoPage() {
     <div className="flex flex-wrap gap-2"><button onClick={() => void diagnosticar()} disabled={cargando} className="rounded-lg bg-slate-900 px-4 py-2 text-white">{cargando ? 'Ejecutando...' : 'Ejecutar diagnóstico'}</button><button onClick={() => void repararSeguro()} className="rounded-lg border px-4 py-2">Reparar automáticamente lo seguro</button></div>
     {mensaje && <p className="text-sm text-slate-600">{mensaje}</p>}
     <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{cards.map((c) => <button key={c.key} onClick={() => c.valor > 0 && setCardSeleccionada(c.key)} className={`rounded-xl border bg-white p-4 text-left ${c.valor > 0 ? 'cursor-pointer hover:border-slate-400' : 'cursor-default opacity-80'} ${cardSeleccionada === c.key ? 'border-slate-900 ring-1 ring-slate-900' : ''}`}><p className="text-xs text-slate-500">{c.titulo}</p><p className="text-2xl font-bold">{c.valor}</p></button>)}</section>
-    {cardSeleccionada === 'compromisosSinCalendario' && <section className="space-y-2 rounded-xl border bg-white p-4"><p className="text-sm text-slate-600">Estos compromisos activos sí se pueden reparar regenerando calendario.</p>{data.compromisosSinCalendario.map((c) => <div key={c.id} className="rounded-lg border p-3 text-sm md:grid md:grid-cols-9 md:gap-2"><span>{c.cuenta?.nombre_cuenta}</span><span>{c.periodo_pago_estimado}</span><span>{c.fecha_estimada_pago ?? '-'}</span><span>{c.establecimiento}</span><span>{c.monto_cuota}</span><span>{c.persona?.nombre}</span><span>{c.origen_cuota}</span><span>{c.estado}</span><div className="flex gap-2"><button onClick={() => void regenerarCalendario(c)} className="rounded border px-2">Regenerar calendario</button>{c.gasto ? <button className="rounded border px-2" onClick={() => setGastoDetalle(c.gasto)}>Ver gasto</button> : <span className="text-xs text-slate-500">Gasto no disponible</span>}</div></div>)}</section>}
-    {cardSeleccionada === 'compromisosHuerfanosAnulados' && <section className="space-y-2 rounded-xl border bg-white p-4"><p className="text-sm text-slate-600">Estos compromisos quedaron sin un gasto activo asociado. Pueden venir de anulaciones o pruebas fallidas. No se deben reparar creando calendarios; se pueden marcar como cancelados.</p>{data.compromisosHuerfanosAnulados.map((c) => <div key={c.id} className="rounded-lg border p-3 text-sm md:grid md:grid-cols-10 md:gap-2"><span>{c.cuenta?.nombre_cuenta}</span><span>{c.periodo_pago_estimado}</span><span>{c.fecha_estimada_pago ?? '-'}</span><span>{c.establecimiento}</span><span>{c.monto_cuota}</span><span>{c.persona?.nombre}</span><span>{c.origen_cuota}</span><span>{c.estado}</span><span className="font-medium text-amber-700">{c.motivo_huerfano}</span><div className="flex gap-2"><button onClick={() => void marcarCompromisoCancelado(c)} className="rounded border px-2">Marcar como cancelado</button>{c.gasto ? <button className="rounded border px-2" onClick={() => setGastoDetalle(c.gasto)}>Ver detalle</button> : <span className="text-xs text-slate-500">Gasto no disponible</span>}</div></div>)}</section>}
+    {cardSeleccionada === 'compromisosSinCalendario' && <section className="space-y-2 rounded-xl border bg-white p-4"><p className="text-sm text-slate-600">Estos compromisos activos sí se pueden reparar regenerando calendario de resumen. El período de pago se muestra solo como referencia de flujo.</p>{data.compromisosSinCalendario.map((c) => <div key={c.id} className="rounded-lg border p-3 text-sm md:grid md:grid-cols-10 md:gap-2"><span>{c.cuenta?.nombre_cuenta}</span><span>{c.gasto?.fecha_gasto ?? '-'}</span><span>{c.periodo_resumen_faltante ?? '-'}</span><span>{c.periodo_pago_flujo ?? c.periodo_pago_estimado}</span><span>{c.establecimiento}</span><span>{c.monto_cuota}</span><span>{c.persona?.nombre}</span><span>{c.origen_cuota}</span><span>{c.estado}</span><div className="flex gap-2"><button onClick={() => void regenerarCalendario(c)} className="rounded border px-2">Regenerar calendario</button>{c.gasto_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleGastoDesdeCuota(c)}>Ver gasto</button> : <span className="text-xs text-slate-500">Gasto no disponible</span>}</div></div>)}</section>}
+    {cardSeleccionada === 'compromisosHuerfanosAnulados' && <section className="space-y-2 rounded-xl border bg-white p-4"><p className="text-sm text-slate-600">Estos compromisos no tienen un gasto activo asociado. No se regenerará calendario para ellos.</p>{data.compromisosHuerfanosAnulados.map((c) => <div key={c.id} className="rounded-lg border p-3 text-sm md:grid md:grid-cols-10 md:gap-2"><span>{c.cuenta?.nombre_cuenta}</span><span>{c.periodo_pago_estimado}</span><span>{c.fecha_estimada_pago ?? '-'}</span><span>{c.establecimiento}</span><span>{c.monto_cuota}</span><span>{c.persona?.nombre}</span><span>{c.origen_cuota}</span><span>{c.estado}</span><span className="font-medium text-amber-700">{c.motivo_huerfano}</span><div className="flex gap-2"><button onClick={() => void marcarCompromisoCancelado(c)} className="rounded border px-2">Marcar como cancelado</button>{c.gasto_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleGastoDesdeCuota(c)}>Ver detalle</button> : <span className="text-xs text-slate-500">Gasto no disponible</span>}</div></div>)}</section>}
     {gastoDetalle && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="w-full max-w-xl rounded-xl bg-white p-4"><div className="mb-3 flex items-center justify-between"><h3 className="text-lg font-semibold">Detalle de gasto</h3><button className="rounded border px-2 py-1 text-sm" onClick={() => setGastoDetalle(null)}>Cerrar</button></div><div className="grid grid-cols-2 gap-2 text-sm"><span>Fecha</span><span>{gastoDetalle.fecha_gasto ?? '-'}</span><span>Establecimiento</span><span>{gastoDetalle.establecimiento ?? '-'}</span><span>Monto</span><span>{gastoDetalle.monto ?? '-'}</span><span>Moneda</span><span>{gastoDetalle.moneda ?? '-'}</span><span>Persona</span><span>{gastoDetalle.persona?.nombre ?? '-'}</span><span>Categoría</span><span>{gastoDetalle.categoria?.nombre ?? '-'}</span><span>Medio de pago</span><span>{gastoDetalle.medio_pago?.tipo ?? '-'}</span><span>Cuenta de tarjeta</span><span>{gastoDetalle.cuenta?.nombre_cuenta ?? '-'}</span><span>Tarjeta física</span><span>{gastoDetalle.tarjeta?.alias ?? '-'}</span><span>Estado</span><span>{gastoDetalle.estado_registro ?? '-'}</span><span>Observaciones</span><span>{gastoDetalle.observaciones ?? '-'}</span><span>Comprobante</span><span>{gastoDetalle.comprobante?.id ? 'Sí' : 'No'}</span></div></div></div>}
   </main>;
 }
