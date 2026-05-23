@@ -9,3 +9,12 @@
 body {
   @apply bg-slate-50 text-slate-900 antialiased;
 }
+
+
+.pb-safe-bottom {
+  padding-bottom: max(6rem, env(safe-area-inset-bottom));
+}
+
+.pt-safe-top {
+  padding-top: env(safe-area-inset-top);
+}

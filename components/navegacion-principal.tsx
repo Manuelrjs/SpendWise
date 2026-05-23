@@ -36,11 +36,11 @@ export function NavegacionPrincipal() {
         </nav>
       </aside>
 
-      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white p-2 md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:hidden">
         <ul className="grid grid-cols-3 gap-1 text-center text-xs">
           {enlaces.slice(0, 6).map((enlace) => (
             <li key={enlace.href}>
-              <Link href={enlace.href} className="block rounded-md px-1 py-2 text-slate-700 hover:bg-slate-100">
+              <Link href={enlace.href} className="block rounded-md px-2 py-2.5 text-slate-700 hover:bg-slate-100">
                 {enlace.etiqueta}
               </Link>
             </li>

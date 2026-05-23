@@ -134,3 +134,18 @@ OPENAI_API_KEY=
 - El usuario siempre valida antes de guardar.
 - El gasto **no** se guarda automáticamente al analizar el comprobante.
 - Si falta `OPENAI_API_KEY`, la app muestra: **"La extracción automática aún no está configurada."**
+
+
+## Instalar SpendWise en iPhone como PWA
+
+1. Abrir la URL de SpendWise en **Safari**.
+2. Tocar el botón **Compartir**.
+3. Elegir **Agregar a pantalla de inicio**.
+4. Confirmar el nombre **SpendWise**.
+5. Abrir la app desde el ícono en la pantalla de inicio.
+
+Notas importantes:
+
+- Esta PWA todavía **no** es una app publicada en App Store.
+- El análisis de PDF con IA queda para una fase posterior.
+- El share directo desde WhatsApp queda para una fase posterior.
