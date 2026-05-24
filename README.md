@@ -150,9 +150,9 @@ Notas importantes:
 - El análisis de PDF con IA queda para una fase posterior.
 - El share directo desde WhatsApp queda para una fase posterior.
 
-## Compartir comprobantes desde iPhone
+## Cargar comprobantes desde WhatsApp en iPhone
 
-### Flujo recomendado actual
+### Flujo recomendado
 
 1. Guardar la imagen del comprobante desde WhatsApp en **Fotos** o **Archivos**.
 2. Abrir SpendWise.
@@ -167,6 +167,7 @@ Notas importantes:
 
 Notas:
 
+- En iPhone, las PWA pueden no aparecer como destino directo en el menú Compartir.
 - El soporte de compartir directo depende de iOS/Safari y de si la PWA está instalada.
 - Si SpendWise no aparece en el menú de compartir, usar el flujo recomendado de galería/archivos.
 - Los PDF todavía no se analizan con IA; se muestra el mensaje de fase posterior.
