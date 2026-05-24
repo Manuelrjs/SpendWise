@@ -16,5 +16,21 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: '/icon', sizes: '512x512', type: 'image/png' },
       { src: '/apple-icon', sizes: '180x180', type: 'image/png' },
     ],
+    share_target: {
+      action: '/compartir',
+      method: 'POST',
+      enctype: 'multipart/form-data',
+      params: {
+        title: 'title',
+        text: 'text',
+        url: 'url',
+        files: [
+          {
+            name: 'comprobante',
+            accept: ['image/*', 'application/pdf'],
+          },
+        ],
+      },
+    },
   };
 }

@@ -149,3 +149,24 @@ Notas importantes:
 - Esta PWA todavía **no** es una app publicada en App Store.
 - El análisis de PDF con IA queda para una fase posterior.
 - El share directo desde WhatsApp queda para una fase posterior.
+
+## Compartir comprobantes desde iPhone
+
+### Flujo recomendado actual
+
+1. Guardar la imagen del comprobante desde WhatsApp en **Fotos** o **Archivos**.
+2. Abrir SpendWise.
+3. Ir a **Nuevo gasto**.
+4. Tocar **Elegir de galería** o **Subir archivo**.
+5. Tocar **Analizar comprobante** para obtener sugerencias.
+
+### Flujo experimental (PWA Share Target)
+
+1. Compartir imagen/PDF desde WhatsApp o Fotos hacia **SpendWise** (si aparece como opción).
+2. SpendWise abre **/gastos/nuevo** con el comprobante precargado para revisión manual.
+
+Notas:
+
+- El soporte de compartir directo depende de iOS/Safari y de si la PWA está instalada.
+- Si SpendWise no aparece en el menú de compartir, usar el flujo recomendado de galería/archivos.
+- Los PDF todavía no se analizan con IA; se muestra el mensaje de fase posterior.
