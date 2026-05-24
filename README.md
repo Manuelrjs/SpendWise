@@ -170,4 +170,11 @@ Notas:
 - En iPhone, las PWA pueden no aparecer como destino directo en el menú Compartir.
 - El soporte de compartir directo depende de iOS/Safari y de si la PWA está instalada.
 - Si SpendWise no aparece en el menú de compartir, usar el flujo recomendado de galería/archivos.
-- Los PDF todavía no se analizan con IA; se muestra el mensaje de fase posterior.
+- Los PDF simples ya pueden analizarse con IA en /gastos/nuevo. Para resúmenes de tarjeta, la conciliación queda para una fase posterior.
+
+## Análisis de comprobantes PDF
+
+- En **/gastos/nuevo** se soporta el análisis con IA de **PDF simples** de comprobantes/facturas (digitales o escaneados de una o pocas páginas).
+- Si el archivo parece un **resumen de tarjeta**, la app muestra una advertencia y aclara que la conciliación de resúmenes se implementará en una fase posterior.
+- Si el PDF no se puede analizar con la configuración actual, se muestra un mensaje claro y se puede continuar con la **carga manual** del gasto.
+- El análisis se ejecuta del lado servidor en `/api/comprobantes/analizar`.

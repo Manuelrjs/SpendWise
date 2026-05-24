@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { TAMANO_MAXIMO_COMPROBANTE_BYTES } from '@/lib/comprobantes';
 
 const TIPOS_IMAGEN = ['image/jpg', 'image/jpeg', 'image/png', 'image/webp'];
+const TIPO_PDF = 'application/pdf';
 const OPENAI_MODEL = 'gpt-4o-mini';
 const MENSAJE_ERROR_ANALISIS = 'No se pudo analizar el comprobante';
 
@@ -195,17 +196,10 @@ export async function POST(request: Request) {
       return NextResponse.json(construirRespuestaError(detalle, 'validacion'), { status: 400 });
     }
 
-    if (archivo.type === 'application/pdf') {
-      return NextResponse.json({
-        sugerencias: {
-          ...RESPUESTA_POR_DEFECTO,
-          observaciones: 'La lectura automática de PDF se implementará en una fase posterior.',
-          advertencias: ['La lectura automática de PDF se implementará en una fase posterior.'],
-        } satisfies DatosComprobanteSugeridos,
-      });
-    }
+    const esPdf = archivo.type === TIPO_PDF;
+    const esImagen = TIPOS_IMAGEN.includes(archivo.type);
 
-    if (!TIPOS_IMAGEN.includes(archivo.type)) {
+    if (!esPdf && !esImagen) {
       const detalle = extraerDetalleError('Formato no soportado para análisis automático.');
       console.error('Error analizando comprobante:', detalle);
       return NextResponse.json(construirRespuestaError(detalle, 'validacion'), { status: 400 });
@@ -226,7 +220,33 @@ export async function POST(request: Request) {
     const bytes = await archivo.arrayBuffer();
     const base64 = Buffer.from(bytes).toString('base64');
     const dataUrl = `data:${archivo.type};base64,${base64}`;
-    const prompt = `Analizá la imagen de un comprobante (ticket/factura) y devolvé SOLO JSON válido (sin markdown).
+    const prompt = esPdf
+      ? `Analizá este comprobante o factura en PDF y devolvé SOLO JSON válido (sin markdown).
+Campos obligatorios:
+{
+  "fecha_gasto": "YYYY-MM-DD o vacío",
+  "establecimiento": "texto o vacío",
+  "monto": number o null,
+  "moneda": "ARS/USD/etc",
+  "categoria_sugerida": "texto o vacío",
+  "medio_pago_sugerido": "texto o vacío",
+  "identificador_fiscal": "texto o vacío",
+  "descripcion": "texto o vacío",
+  "observaciones": "texto",
+  "confianza": number,
+  "advertencias": []
+}
+Reglas:
+- Este endpoint es para comprobantes/facturas simples, no para resúmenes de tarjeta.
+- Si detectás que parece resumen de tarjeta, indicarlo en advertencias.
+- Identificar total final pagado, no subtotal.
+- Si hay varios importes, elegir el importe final/total.
+- Si no estás seguro en un campo, usar vacío o null y agregar advertencia.
+- Normalizar fecha a YYYY-MM-DD si es posible.
+- Normalizar moneda a ARS si parece comprobante argentino y no hay otra moneda clara.
+- No inventar datos.
+- Sugerir categoría y medio de pago como texto libre, sin depender de IDs o catálogos locales.`
+      : `Analizá la imagen de un comprobante (ticket/factura) y devolvé SOLO JSON válido (sin markdown).
 Campos obligatorios:
 {
   "fecha_gasto": "YYYY-MM-DD o vacío",
@@ -264,7 +284,9 @@ Reglas:
             role: 'user',
             content: [
               { type: 'input_text', text: prompt },
-              { type: 'input_image', image_url: dataUrl },
+              esPdf
+                ? { type: 'input_file', filename: archivo.name || 'comprobante.pdf', file_data: dataUrl }
+                : { type: 'input_image', image_url: dataUrl },
             ],
           },
         ],
@@ -274,7 +296,7 @@ Reglas:
 
     if (!respuestaOpenAI.ok) {
       const textoError = await respuestaOpenAI.text();
-      throw Object.assign(new Error('Error de OpenAI al analizar el comprobante.'), {
+      throw Object.assign(new Error(esPdf ? 'No se pudo analizar el PDF con la configuración actual. Podés cargar el gasto manualmente.' : 'Error de OpenAI al analizar el comprobante.'), {
         status: respuestaOpenAI.status,
         response: { data: textoError },
       });
@@ -307,7 +329,6 @@ Reglas:
       parsed = JSON.parse(contenidoLimpio) as unknown;
     } catch (error) {
       const detalle = extraerDetalleError(error);
-      const mensaje = 'No se pudo interpretar la respuesta de IA.';
       console.error('Error analizando comprobante:', {
         ...detalle,
         respuesta_cruda: contenido,
@@ -320,7 +341,37 @@ Reglas:
       }, { status: 502 });
     }
 
-    return NextResponse.json({ sugerencias: limpiarRespuesta(parsed) });
+
+    const sugerencias = limpiarRespuesta(parsed);
+    const textoAnalizado = [
+      sugerencias.establecimiento,
+      sugerencias.descripcion,
+      sugerencias.observaciones,
+      ...(sugerencias.advertencias ?? []),
+    ].join(' ').toLowerCase();
+    const indicadoresResumen = [
+      'resumen de cuenta', 'resumen de tarjeta', 'pago minimo', 'pago mínimo', 'saldo anterior', 'cierre actual',
+      'proximo vencimiento', 'próximo vencimiento', 'mastercard', 'visa', 'total a pagar', 'cuotas del resumen',
+      'limite de compra', 'límite de compra', 'limite de financiacion', 'límite de financiación',
+    ];
+    const pareceResumenTarjeta = esPdf && indicadoresResumen.some((item) => textoAnalizado.includes(item));
+
+    if (pareceResumenTarjeta) {
+      return NextResponse.json({
+        sugerencias: {
+          ...sugerencias,
+          advertencias: [
+            ...sugerencias.advertencias,
+            'Este PDF parece un resumen de tarjeta. La conciliación de resúmenes se implementará en una fase posterior.',
+          ],
+        },
+        advertencias: ['Este PDF parece un resumen de tarjeta. La conciliación de resúmenes se implementará en una fase posterior.'],
+        tipo_documento_detectado: 'resumen_tarjeta',
+      });
+    }
+
+    return NextResponse.json({ sugerencias });
+
   } catch (error) {
     const detalle = extraerDetalleError(error);
     console.error('Error analizando comprobante:', {

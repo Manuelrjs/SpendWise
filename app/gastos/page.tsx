@@ -150,6 +150,12 @@ export default function Page() {
     return acc;
   }, new Map<string, number>()), [comprobantes]);
 
+  const gastosConComprobantePdf = useMemo(() => new Set(
+    comprobantes
+      .filter((comprobante) => comprobante.tipo_archivo === 'application/pdf')
+      .map((comprobante) => comprobante.gasto_id),
+  ), [comprobantes]);
+
   const cuotasPorGasto = useMemo(() => cuotas.reduce((acc, cuota) => {
     if (!cuota.gasto_id) return acc;
     const lista = acc.get(cuota.gasto_id) ?? [];
@@ -475,7 +481,7 @@ export default function Page() {
           ? etiquetaCuota(cuotasDelGasto[0].numero_cuota, cuotasDelGasto[0].total_cuotas)
           : `${etiquetaCuota(cuotasDelGasto[0].numero_cuota, cuotasDelGasto[0].total_cuotas)} · +${cuotasDelGasto.length - 1}`)
         : (esMedioTarjetaCredito(gasto.medio_pago_id) ? 'Tarjeta sin compromiso' : String(gasto.cantidad_cuotas));
-      return <tr key={gasto.id} className={`border-t ${gasto.estado_registro === 'anulado' ? 'text-slate-400' : ''}`}><td className="px-2 py-2">{gasto.fecha_gasto}</td><td className="px-2">{gasto.establecimiento}</td><td className="px-2">{nombresCategoria.get(gasto.categoria_id)}</td><td className="px-2">{nombresPersona.get(gasto.persona_id)}</td><td className="px-2">{nombresMedioPago.get(gasto.medio_pago_id)}</td><td className="px-2">{resumenCuotas}</td><td className="px-2">{(comprobantesPorGasto.get(gasto.id) ?? 0) > 0 ? <button type="button" onClick={() => { setGastoPreviewId(gasto.id); setIndicePreview(0); setComprobantePreviewAbierto(true); }} className="cursor-pointer rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700 transition hover:bg-emerald-200">Con comprobante</button> : <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">Sin comprobante</span>}</td><td className="px-2">{gasto.estado_registro === 'anulado' ? <span className="rounded bg-rose-100 px-2 py-1 text-xs text-rose-700">Anulado</span> : null}</td><td className="px-2"><button onClick={() => setGastoEditando(gasto)} className="rounded border px-2 py-1">Editar</button>{gasto.estado_registro !== 'anulado' ? <button onClick={() => void anularGasto(gasto)} className="ml-2 rounded border border-rose-200 px-2 py-1 text-rose-700">Anular</button> : null}</td></tr>;
+      return <tr key={gasto.id} className={`border-t ${gasto.estado_registro === 'anulado' ? 'text-slate-400' : ''}`}><td className="px-2 py-2">{gasto.fecha_gasto}</td><td className="px-2">{gasto.establecimiento}</td><td className="px-2">{nombresCategoria.get(gasto.categoria_id)}</td><td className="px-2">{nombresPersona.get(gasto.persona_id)}</td><td className="px-2">{nombresMedioPago.get(gasto.medio_pago_id)}</td><td className="px-2">{resumenCuotas}</td><td className="px-2">{(comprobantesPorGasto.get(gasto.id) ?? 0) > 0 ? <button type="button" onClick={() => { setGastoPreviewId(gasto.id); setIndicePreview(0); setComprobantePreviewAbierto(true); }} className="cursor-pointer rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700 transition hover:bg-emerald-200">{gastosConComprobantePdf.has(gasto.id) ? 'Con comprobante PDF' : 'Con comprobante'}</button> : <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">Sin comprobante</span>}</td><td className="px-2">{gasto.estado_registro === 'anulado' ? <span className="rounded bg-rose-100 px-2 py-1 text-xs text-rose-700">Anulado</span> : null}</td><td className="px-2"><button onClick={() => setGastoEditando(gasto)} className="rounded border px-2 py-1">Editar</button>{gasto.estado_registro !== 'anulado' ? <button onClick={() => void anularGasto(gasto)} className="ml-2 rounded border border-rose-200 px-2 py-1 text-rose-700">Anular</button> : null}</td></tr>;
     })}</tbody></table></div>
 
     {comprobantePreviewAbierto ? <div className="fixed inset-0 z-50 flex items-end bg-slate-900/60 p-0 sm:items-center sm:justify-center sm:p-4">
