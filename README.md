@@ -178,3 +178,19 @@ Notas:
 - Si el archivo parece un **resumen de tarjeta**, la app muestra una advertencia y aclara que la conciliación de resúmenes se implementará en una fase posterior.
 - Si el PDF no se puede analizar con la configuración actual, se muestra un mensaje claro y se puede continuar con la **carga manual** del gasto.
 - El análisis se ejecuta del lado servidor en `/api/comprobantes/analizar`.
+
+## Auth básica y separación por familia (Tarea 28)
+
+1. Ejecutar la migración `supabase/migrations/003_auth_familias.sql`.
+2. En Supabase Auth habilitar Email/Password.
+3. Crear primer usuario desde `/registro` o desde panel Auth.
+4. Al registrarse un usuario, un trigger crea `familias` y `perfiles` automáticamente.
+5. Las tablas operativas ahora incluyen `familia_id` y quedan listas para filtrar por familia (y para RLS progresiva).
+6. En comprobantes nuevos, la ruta de Storage usa: `comprobantes/{familia_id}/{año}/{mes}/{gasto_id}/{archivo}`.
+7. La API key `OPENAI_API_KEY` sigue siendo server-side y no debe exponerse en variables `NEXT_PUBLIC`.
+
+### Probar login
+
+- Ir a `/login` con un usuario válido.
+- Si no hay sesión, las rutas privadas redirigen a `/login`.
+- Cerrar sesión desde menú lateral y verificar vuelta a `/login`.

@@ -83,6 +83,15 @@ type Filtros = {
 };
 
 const ESTADOS_EDITABLES_CUOTA = new Set(['pendiente', 'proyectada', 'no_incluida', 'reprogramada']);
+async function obtenerFamiliaIdActual() {
+  const { data: authData } = await supabase.auth.getUser();
+  const userId = authData.user?.id;
+  if (!userId) throw new Error('No hay sesión activa.');
+  const { data, error } = await supabase.from('perfiles').select('familia_id').eq('id', userId).maybeSingle();
+  if (error || !data?.familia_id) throw new Error('No se pudo cargar tu perfil. Cerrá sesión e intentá nuevamente.');
+  return data.familia_id as string;
+}
+
 const FILTROS_INICIALES: Filtros = { busqueda: '', fecha_desde: '', fecha_hasta: '', categoria_id: '', persona_id: '', medio_pago_id: '', cuenta_tarjeta_id: '', tarjeta_fisica_id: '', estado_registro: 'activos' };
 
 function formatearTamanoArchivo(tamano: number) {
@@ -398,7 +407,8 @@ export default function Page() {
       const anio = String(fecha.getFullYear());
       const mes = String(fecha.getMonth() + 1).padStart(2, '0');
       const nombreArchivo = normalizarNombreArchivo(archivo.name);
-      const rutaStorage = `${anio}/${mes}/${gastoId}/${nombreArchivo}`;
+      const familiaId = await obtenerFamiliaIdActual();
+      const rutaStorage = `${familiaId}/${anio}/${mes}/${gastoId}/${nombreArchivo}`;
       const { error: errorStorage } = await supabase.storage.from('comprobantes').upload(rutaStorage, archivo, { upsert: false, contentType: archivo.type });
       if (errorStorage) {
         console.error(errorStorage);
