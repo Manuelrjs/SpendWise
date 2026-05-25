@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { NavegacionPrincipal } from '@/components/navegacion-principal';
+import { AuthGuard } from '@/components/auth-guard';
 
 export const metadata: Metadata = {
   title: 'SpendWise',
@@ -28,7 +29,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <div className="min-h-screen md:flex">
           <NavegacionPrincipal />
-          <main className="w-full px-4 pt-6 pb-safe-bottom md:px-8 md:pb-8">{children}</main>
+          <main className="w-full px-4 pt-6 pb-safe-bottom md:px-8 md:pb-8"><AuthGuard>{children}</AuthGuard></main>
         </div>
       </body>
     </html>

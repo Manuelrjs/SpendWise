@@ -56,6 +56,15 @@ function crearNombreComprobantePegado() {
   return `comprobante-pegado-${yyyy}-${mm}-${dd}-${hh}${min}.png`;
 }
 
+async function obtenerFamiliaIdActual() {
+  const { data: authData } = await supabase.auth.getUser();
+  const userId = authData.user?.id;
+  if (!userId) throw new Error('No hay sesión activa.');
+  const { data, error } = await supabase.from('perfiles').select('familia_id').eq('id', userId).maybeSingle();
+  if (error || !data?.familia_id) throw new Error('No se pudo cargar tu perfil. Cerrá sesión e intentá nuevamente.');
+  return data.familia_id as string;
+}
+
 function normalizarNombreCategoria(nombre: string) {
   return nombre.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
 }
@@ -399,12 +408,14 @@ export default function Page() {
       if (eg || !gasto) throw new Error('No se pudo guardar el gasto.');
       gastoCreadoId = gasto.id;
 
+      const familiaId = await obtenerFamiliaIdActual();
+
       if (comprobante) {
         const fechaComprobante = formulario.fecha_gasto ? new Date(`${formulario.fecha_gasto}T00:00:00`) : new Date();
         const anio = String(fechaComprobante.getFullYear());
         const mes = String(fechaComprobante.getMonth() + 1).padStart(2, '0');
         const nombreArchivo = normalizarNombreArchivo(comprobante.name);
-        const rutaStorage = `${anio}/${mes}/${gasto.id}/${nombreArchivo}`;
+        const rutaStorage = `${familiaId}/${anio}/${mes}/${gasto.id}/${nombreArchivo}`;
 
         const { error: errorStorage } = await supabase.storage.from('comprobantes').upload(rutaStorage, comprobante, { upsert: false, contentType: comprobante.type });
         if (errorStorage) {

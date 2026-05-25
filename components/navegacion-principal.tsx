@@ -1,52 +1,6 @@
+'use client';
 import Link from 'next/link';
-
-const enlaces = [
-  { href: '/', etiqueta: 'Inicio' },
-  { href: '/gastos/nuevo', etiqueta: 'Nuevo gasto' },
-  { href: '/gastos', etiqueta: 'Gastos' },
-  { href: '/reportes', etiqueta: 'Reportes' },
-  { href: '/tarjetas', etiqueta: 'Tarjetas' },
-  { href: '/calendario', etiqueta: 'Calendario' },
-  { href: '/flujo', etiqueta: 'Flujo mensual' },
-  { href: '/cuotas-iniciales', etiqueta: 'Cuotas iniciales' },
-  { href: '/configuracion/personas', etiqueta: 'Personas' },
-  { href: '/configuracion/categorias', etiqueta: 'Categorías' },
-  { href: '/configuracion/medios-pago', etiqueta: 'Medios de pago' },
-  { href: '/configuracion/mantenimiento', etiqueta: 'Mantenimiento' },
-];
-
-export function NavegacionPrincipal() {
-  return (
-    <>
-      <aside className="hidden md:flex md:w-64 md:flex-col md:border-r md:border-slate-200 md:bg-white">
-        <div className="border-b border-slate-200 px-5 py-4">
-          <p className="text-lg font-semibold">SpendWise</p>
-          <p className="text-sm text-slate-500">Control inteligente de gastos, tarjetas y pagos.</p>
-        </div>
-        <nav className="flex-1 space-y-1 p-3">
-          {enlaces.map((enlace) => (
-            <Link
-              key={enlace.href}
-              href={enlace.href}
-              className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            >
-              {enlace.etiqueta}
-            </Link>
-          ))}
-        </nav>
-      </aside>
-
-      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:hidden">
-        <ul className="grid grid-cols-3 gap-1 text-center text-xs">
-          {enlaces.slice(0, 6).map((enlace) => (
-            <li key={enlace.href}>
-              <Link href={enlace.href} className="block rounded-md px-2 py-2.5 text-slate-700 hover:bg-slate-100">
-                {enlace.etiqueta}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </nav>
-    </>
-  );
-}
+import { usePathname, useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase/client';
+const enlaces = [ { href: '/', etiqueta: 'Inicio' }, { href: '/gastos/nuevo', etiqueta: 'Nuevo gasto' }, { href: '/gastos', etiqueta: 'Gastos' }, { href: '/reportes', etiqueta: 'Reportes' }, { href: '/tarjetas', etiqueta: 'Tarjetas' }, { href: '/calendario', etiqueta: 'Calendario' }, { href: '/flujo', etiqueta: 'Flujo mensual' }, { href: '/cuotas-iniciales', etiqueta: 'Cuotas iniciales' }, { href: '/configuracion/personas', etiqueta: 'Personas' }, { href: '/configuracion/categorias', etiqueta: 'Categorías' }, { href: '/configuracion/medios-pago', etiqueta: 'Medios de pago' }, { href: '/configuracion/mantenimiento', etiqueta: 'Mantenimiento' }];
+export function NavegacionPrincipal() { const pathname = usePathname(); const router = useRouter(); if (pathname === '/login' || pathname === '/registro') return null; const cerrarSesion = async () => { await supabase.auth.signOut(); router.replace('/login'); }; return <><aside className="hidden md:flex md:w-64 md:flex-col md:border-r md:border-slate-200 md:bg-white"><div className="border-b border-slate-200 px-5 py-4"><p className="text-lg font-semibold">SpendWise</p><p className="text-sm text-slate-500">Control inteligente de gastos, tarjetas y pagos.</p><button onClick={cerrarSesion} className="mt-2 text-xs text-rose-600">Cerrar sesión</button></div><nav className="flex-1 space-y-1 p-3">{enlaces.map((enlace) => <Link key={enlace.href} href={enlace.href} className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">{enlace.etiqueta}</Link>)}</nav></aside><nav className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:hidden"><ul className="grid grid-cols-3 gap-1 text-center text-xs">{enlaces.slice(0, 6).map((enlace) => <li key={enlace.href}><Link href={enlace.href} className="block rounded-md px-2 py-2.5 text-slate-700 hover:bg-slate-100">{enlace.etiqueta}</Link></li>)}</ul></nav></>; }
