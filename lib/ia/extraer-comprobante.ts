@@ -1,6 +1,9 @@
 export type ItemMapeo = { id: string; nombre: string; tipo?: string | null };
 
 export type DatosComprobanteSugeridos = {
+  establecimiento_candidatos?: Array<{ nombre: string; tipo: string; confianza: number }>;
+  emisor_factura?: string;
+  receptor_factura?: string;
   fecha_gasto?: string;
   establecimiento?: string;
   monto?: number | null;

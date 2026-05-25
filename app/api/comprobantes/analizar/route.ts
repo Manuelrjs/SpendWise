@@ -18,6 +18,9 @@ type DatosComprobanteSugeridos = {
   observaciones: string;
   confianza: number;
   advertencias: string[];
+  establecimiento_candidatos: Array<{ nombre: string; tipo: string; confianza: number }>;
+  emisor_factura: string;
+  receptor_factura: string;
 };
 
 const RESPUESTA_POR_DEFECTO: DatosComprobanteSugeridos = {
@@ -32,6 +35,9 @@ const RESPUESTA_POR_DEFECTO: DatosComprobanteSugeridos = {
   observaciones: '',
   confianza: 0,
   advertencias: [],
+  establecimiento_candidatos: [],
+  emisor_factura: '',
+  receptor_factura: '',
 };
 
 function limpiarRespuesta(payload: unknown): DatosComprobanteSugeridos {
@@ -54,6 +60,20 @@ function limpiarRespuesta(payload: unknown): DatosComprobanteSugeridos {
   base.advertencias = Array.isArray(data.advertencias)
     ? data.advertencias.filter((item): item is string => typeof item === 'string')
     : [];
+  base.establecimiento_candidatos = Array.isArray(data.establecimiento_candidatos)
+    ? data.establecimiento_candidatos
+      .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+      .map((item) => ({
+        nombre: typeof item.nombre === 'string' ? item.nombre.trim() : '',
+        tipo: typeof item.tipo === 'string' ? item.tipo.trim().toLowerCase() : 'otro',
+        confianza: typeof item.confianza === 'number' && Number.isFinite(item.confianza)
+          ? Math.max(0, Math.min(1, item.confianza))
+          : 0,
+      }))
+      .filter((item) => item.nombre.length > 0)
+    : [];
+  base.emisor_factura = typeof data.emisor_factura === 'string' ? data.emisor_factura : '';
+  base.receptor_factura = typeof data.receptor_factura === 'string' ? data.receptor_factura : '';
 
   return base;
 }
@@ -234,7 +254,10 @@ Campos obligatorios:
   "descripcion": "texto o vacío",
   "observaciones": "texto",
   "confianza": number,
-  "advertencias": []
+  "advertencias": [],
+  "establecimiento_candidatos": [{ "nombre": "texto", "tipo": "emisor|proveedor|vendedor|comercio|establecimiento|razon_social_emisora|receptor|cliente|comprador|consumidor|facturado_a|destinatario|otro", "confianza": 0.0 }],
+  "emisor_factura": "texto o vacío",
+  "receptor_factura": "texto o vacío"
 }
 Reglas:
 - Este endpoint es para comprobantes/facturas simples, no para resúmenes de tarjeta.
@@ -245,7 +268,13 @@ Reglas:
 - Normalizar fecha a YYYY-MM-DD si es posible.
 - Normalizar moneda a ARS si parece comprobante argentino y no hay otra moneda clara.
 - No inventar datos.
-- Sugerir categoría y medio de pago como texto libre, sin depender de IDs o catálogos locales.`
+- Sugerir categoría y medio de pago como texto libre, sin depender de IDs o catálogos locales.
+- Identificar por separado emisor/proveedor/vendedor/comercio/establecimiento/razón social emisora y receptor/cliente/comprador/consumidor/facturado a/destinatario.
+- Para "establecimiento", priorizar emisor/proveedor/vendedor/comercio/razón social emisora.
+- No usar como "establecimiento" el receptor/cliente salvo que no exista ningún emisor claro.
+- No usar "Consumidor Final" como establecimiento.
+- Si detectás nombre comercial y razón social del emisor, preferir nombre comercial si es claro.
+- Si hay dudas entre más de un nombre, devolver opciones en "establecimiento_candidatos".`
       : `Analizá la imagen de un comprobante (ticket/factura) y devolvé SOLO JSON válido (sin markdown).
 Campos obligatorios:
 {
@@ -259,7 +288,10 @@ Campos obligatorios:
   "descripcion": "texto o vacío",
   "observaciones": "texto",
   "confianza": number,
-  "advertencias": []
+  "advertencias": [],
+  "establecimiento_candidatos": [{ "nombre": "texto", "tipo": "emisor|proveedor|vendedor|comercio|establecimiento|razon_social_emisora|receptor|cliente|comprador|consumidor|facturado_a|destinatario|otro", "confianza": 0.0 }],
+  "emisor_factura": "texto o vacío",
+  "receptor_factura": "texto o vacío"
 }
 Reglas:
 - Identificar total final pagado, no subtotal.
@@ -269,7 +301,13 @@ Reglas:
 - Normalizar moneda a ARS si parece comprobante argentino y no hay otra moneda clara.
 - No inventar datos.
 - Sugerir categoría y medio de pago como texto libre, sin depender de IDs o catálogos locales.
-- No forzar categoría o medio de pago con baja confianza.`;
+- No forzar categoría o medio de pago con baja confianza.
+- Identificar por separado emisor/proveedor/vendedor/comercio/establecimiento/razón social emisora y receptor/cliente/comprador/consumidor/facturado a/destinatario.
+- Para "establecimiento", priorizar emisor/proveedor/vendedor/comercio/razón social emisora.
+- No usar como "establecimiento" el receptor/cliente salvo que no exista ningún emisor claro.
+- No usar "Consumidor Final" como establecimiento.
+- Si detectás nombre comercial y razón social del emisor, preferir nombre comercial si es claro.
+- Si hay dudas entre más de un nombre, devolver opciones en "establecimiento_candidatos".`;
 
     const respuestaOpenAI = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
