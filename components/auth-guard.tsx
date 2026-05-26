@@ -2,42 +2,84 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
+import { ensureUserProfile } from '@/lib/auth/ensure-user-profile';
 
 const RUTAS_PUBLICAS = new Set(['/login', '/registro']);
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [cargando, setCargando] = useState(true);
+  const [cargandoSesion, setCargandoSesion] = useState(true);
+  const [cargandoPerfil, setCargandoPerfil] = useState(false);
+  const [errorPerfil, setErrorPerfil] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
-    const verificar = async () => {
-      const { data } = await supabase.auth.getSession();
-      const sesion = data.session;
-      if (!sesion && !RUTAS_PUBLICAS.has(pathname)) {
-        router.replace('/login');
+    let mounted = true;
+
+    const procesarSesion = async (session: Session | null) => {
+      if (!mounted) return;
+      setEmail(session?.user.email ?? null);
+
+      if (!session) {
+        setErrorPerfil(null);
+        setCargandoPerfil(false);
+        if (!RUTAS_PUBLICAS.has(pathname)) router.replace('/login');
+        return;
       }
-      if (sesion && RUTAS_PUBLICAS.has(pathname)) {
+
+      if (RUTAS_PUBLICAS.has(pathname)) {
         router.replace('/');
       }
-      setEmail(sesion?.user.email ?? null);
-      setCargando(false);
+
+      setCargandoPerfil(true);
+      setErrorPerfil(null);
+
+      try {
+        await ensureUserProfile(session.user);
+      } catch (error) {
+        console.error('Error validando perfil en AuthGuard', error);
+        setErrorPerfil('No se pudo cargar tu perfil. Intentá cerrar sesión e ingresar nuevamente.');
+      } finally {
+        if (mounted) setCargandoPerfil(false);
+      }
     };
-    void verificar();
+
+    const inicializar = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error('Error obteniendo sesión', { code: error.code, message: error.message });
+        }
+        await procesarSesion(data.session);
+      } finally {
+        if (mounted) setCargandoSesion(false);
+      }
+    };
+
+    void inicializar();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setEmail(session?.user.email ?? null);
-      if (!session && !RUTAS_PUBLICAS.has(pathname)) router.replace('/login');
+      void procesarSesion(session);
     });
-    return () => listener.subscription.unsubscribe();
+
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
   }, [pathname, router]);
 
-  if (cargando && !RUTAS_PUBLICAS.has(pathname)) return <div className="p-6 text-sm text-slate-500">Cargando sesión...</div>;
+  if (!RUTAS_PUBLICAS.has(pathname) && (cargandoSesion || cargandoPerfil)) {
+    return <div className="p-6 text-sm text-slate-500">Cargando perfil...</div>;
+  }
 
   return (
     <div>
+      {errorPerfil && !RUTAS_PUBLICAS.has(pathname) ? (
+        <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{errorPerfil}</div>
+      ) : null}
       {email && !RUTAS_PUBLICAS.has(pathname) ? <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600">Sesión activa: {email}</div> : null}
       {children}
     </div>
