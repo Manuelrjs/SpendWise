@@ -194,3 +194,30 @@ Notas:
 - Ir a `/login` con un usuario válido.
 - Si no hay sesión, las rutas privadas redirigen a `/login`.
 - Cerrar sesión desde menú lateral y verificar vuelta a `/login`.
+
+## Autenticación en desarrollo
+
+### Confirmación de email en Supabase
+
+- Si en Supabase Auth está activa la confirmación de email, el registro puede crear el usuario **sin iniciar sesión inmediata**.
+- En ese caso, SpendWise muestra: **"Cuenta creada. Revisá tu correo para confirmar el acceso."**
+- Hasta confirmar el correo, el login puede devolver el error de email no confirmado.
+
+### Desarrollo local rápido
+
+- Para pruebas internas, podés desactivar la confirmación de email en Supabase Auth.
+- Con confirmación desactivada, al registrarte la sesión se crea al instante y la app redirige al dashboard.
+
+### Cómo probar login y registro
+
+1. Ir a `/registro` y crear un usuario nuevo.
+2. Si hay sesión inmediata, validar redirección al dashboard.
+3. Cerrar sesión y volver a `/login`.
+4. Iniciar sesión con el mismo usuario y confirmar acceso.
+5. Probar contraseña incorrecta y verificar que el botón vuelva a habilitarse y se vea el error.
+
+### Si no se crea perfil/familia automáticamente
+
+- SpendWise intenta reparar el perfil en cada login/sesión con `ensureUserProfile`.
+- Si el usuario existe en Auth pero no tiene perfil o familia, la app crea los datos faltantes.
+- Si falla la reparación, se muestra un mensaje claro para reintentar sesión y revisar logs de cliente.
