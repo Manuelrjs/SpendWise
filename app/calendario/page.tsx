@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
 import { consolidarDuplicadosCalendario, obtenerOCrearCalendarioEstimado } from '@/lib/calendario-tarjetas';
 
 type CuentaTarjeta = {

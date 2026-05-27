@@ -2,6 +2,7 @@
 
 import { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
 import { MENSAJE_ERROR_BUCKET_COMPROBANTES, normalizarNombreArchivo, validarComprobante } from '@/lib/comprobantes';
 import {
   calcularPeriodoResumenYVencimiento,
@@ -83,13 +84,13 @@ type Filtros = {
 };
 
 const ESTADOS_EDITABLES_CUOTA = new Set(['pendiente', 'proyectada', 'no_incluida', 'reprogramada']);
-async function obtenerFamiliaIdActual() {
+async function obtenerGrupoIdActual() {
   const { data: authData } = await supabase.auth.getUser();
   const userId = authData.user?.id;
   if (!userId) throw new Error('No hay sesión activa.');
-  const { data, error } = await supabase.from('perfiles').select('familia_id').eq('id', userId).maybeSingle();
-  if (error || !data?.familia_id) throw new Error('No se pudo cargar tu perfil. Cerrá sesión e intentá nuevamente.');
-  return data.familia_id as string;
+  const { data, error } = await supabase.from('perfiles').select('grupo_id').eq('id', userId).maybeSingle();
+  if (error || !data?.grupo_id) throw new Error('No se pudo cargar tu perfil. Cerrá sesión e intentá nuevamente.');
+  return data.grupo_id as string;
 }
 
 const FILTROS_INICIALES: Filtros = { busqueda: '', fecha_desde: '', fecha_hasta: '', categoria_id: '', persona_id: '', medio_pago_id: '', cuenta_tarjeta_id: '', tarjeta_fisica_id: '', estado_registro: 'activos' };
@@ -407,7 +408,7 @@ export default function Page() {
       const anio = String(fecha.getFullYear());
       const mes = String(fecha.getMonth() + 1).padStart(2, '0');
       const nombreArchivo = normalizarNombreArchivo(archivo.name);
-      const familiaId = await obtenerFamiliaIdActual();
+      const familiaId = await obtenerGrupoIdActual();
       const rutaStorage = `${familiaId}/${anio}/${mes}/${gastoId}/${nombreArchivo}`;
       const { error: errorStorage } = await supabase.storage.from('comprobantes').upload(rutaStorage, archivo, { upsert: false, contentType: archivo.type });
       if (errorStorage) {

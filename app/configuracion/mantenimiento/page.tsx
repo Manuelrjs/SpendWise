@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
 import { consolidarDuplicadosCalendario, obtenerOCrearCalendarioEstimado, type CalendarioTarjetaDB } from '@/lib/calendario-tarjetas';
 import { calcularPeriodoResumenYVencimiento } from '@/utils/tarjetas';
 

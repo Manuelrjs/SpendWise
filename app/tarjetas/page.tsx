@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
 
 type Persona = { id: string; nombre: string; apellido: string | null; activo: boolean };
 type CuentaTarjeta = { id: string; nombre_cuenta: string; banco: string | null; marca: string | null; persona_titular_id: string; activo: boolean; color_ui: string | null; icono_ui: string | null; dia_cierre_habitual: number | null; dias_hasta_vencimiento: number | null; observaciones: string | null; creado_en: string; persona_titular: Persona | null };

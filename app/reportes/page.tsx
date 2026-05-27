@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
 
 type Opcion = { id: string; nombre: string };
 type Gasto = { id:string; fecha_gasto:string; establecimiento:string; monto:number; moneda:string; categoria_id:string; medio_pago_id:string; persona_id:string; cuenta_tarjeta_id:string|null; tarjeta_fisica_id:string|null; estado_registro:'borrador'|'confirmado'|'anulado' };
