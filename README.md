@@ -179,14 +179,14 @@ Notas:
 - Si el PDF no se puede analizar con la configuración actual, se muestra un mensaje claro y se puede continuar con la **carga manual** del gasto.
 - El análisis se ejecuta del lado servidor en `/api/comprobantes/analizar`.
 
-## Auth básica y separación por familia (Tarea 28)
+## Auth básica con grupos/perfiles (corrección urgente)
 
-1. Ejecutar la migración `supabase/migrations/003_auth_familias.sql`.
-2. En Supabase Auth habilitar Email/Password.
-3. Crear primer usuario desde `/registro` o desde panel Auth.
-4. Al registrarse un usuario, un trigger crea `familias` y `perfiles` automáticamente.
-5. Las tablas operativas ahora incluyen `familia_id` y quedan listas para filtrar por familia (y para RLS progresiva).
-6. En comprobantes nuevos, la ruta de Storage usa: `comprobantes/{familia_id}/{año}/{mes}/{gasto_id}/{archivo}`.
+1. Ir a **Supabase → SQL Editor**.
+2. Ejecutar el SQL de `supabase/migrations/004_auth_grupos_perfiles.sql`.
+3. Verificar que existan las tablas `grupos` y `perfiles`.
+4. En Supabase Auth habilitar Email/Password.
+5. Crear primer usuario desde `/registro` o desde panel Auth.
+6. Si el usuario no tiene perfil, la app intenta repararlo con `ensureUserProfile` creando primero un `grupo` y luego el `perfil`.
 7. La API key `OPENAI_API_KEY` sigue siendo server-side y no debe exponerse en variables `NEXT_PUBLIC`.
 
 ### Probar login
@@ -216,8 +216,8 @@ Notas:
 4. Iniciar sesión con el mismo usuario y confirmar acceso.
 5. Probar contraseña incorrecta y verificar que el botón vuelva a habilitarse y se vea el error.
 
-### Si no se crea perfil/familia automáticamente
+### Si no se crea perfil/grupo automáticamente
 
 - SpendWise intenta reparar el perfil en cada login/sesión con `ensureUserProfile`.
-- Si el usuario existe en Auth pero no tiene perfil o familia, la app crea los datos faltantes.
+- Si el usuario existe en Auth pero no tiene perfil o grupo, la app crea los datos faltantes.
 - Si falla la reparación, se muestra un mensaje claro para reintentar sesión y revisar logs de cliente.
