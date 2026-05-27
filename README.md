@@ -221,3 +221,30 @@ Notas:
 - SpendWise intenta reparar el perfil en cada login/sesión con `ensureUserProfile`.
 - Si el usuario existe en Auth pero no tiene perfil o grupo, la app crea los datos faltantes.
 - Si falla la reparación, se muestra un mensaje claro para reintentar sesión y revisar logs de cliente.
+
+## Asociación de datos por grupo
+
+Desde la Tarea 29, los datos operativos se separan por `grupo_id` para evitar mezcla entre grupos.
+
+Tablas operativas con `grupo_id`:
+
+- `personas`
+- `categorias`
+- `medios_pago`
+- `cuentas_tarjeta`
+- `tarjetas_fisicas`
+- `gastos`
+- `cuotas_tarjeta`
+- `calendario_tarjetas`
+- `compras_cuotas_iniciales`
+- `comprobantes`
+
+Pasos:
+
+1. Ejecutar migración `supabase/migrations/005_add_grupo_id_to_operational_tables.sql`.
+2. Verificar que existe al menos un registro en `grupos`.
+3. Ejecutar el backfill incluido en la misma migración para asignar `grupo_id` a datos existentes.
+
+> Importante: Después de aplicar la migración, ejecutar backfill para asignar datos existentes al grupo actual.
+
+Por ahora el aislamiento queda aplicado desde la app (filtros por `grupo_id`) + índices. La RLS operativa estricta y soporte multi-grupo quedan para una tarea posterior.

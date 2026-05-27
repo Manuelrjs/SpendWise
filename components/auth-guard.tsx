@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
 import { ensureUserProfile } from '@/lib/auth/ensure-user-profile';
+import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
 
 const RUTAS_PUBLICAS = new Set(['/login', '/registro']);
 
@@ -15,6 +16,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const [cargandoPerfil, setCargandoPerfil] = useState(false);
   const [errorPerfil, setErrorPerfil] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
+  const [nombreGrupo, setNombreGrupo] = useState<string | null>(null);
 
   const repararPerfil = async (session: Session | null) => {
     if (!session) return;
@@ -37,6 +39,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     const procesarSesion = async (session: Session | null) => {
       if (!mounted) return;
       setEmail(session?.user.email ?? null);
+      setNombreGrupo(null);
 
       if (!session) {
         setErrorPerfil(null);
@@ -54,6 +57,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
       try {
         await ensureUserProfile(session.user);
+        const perfil = await obtenerPerfilActivo();
+        setNombreGrupo(perfil.grupo_nombre);
       } catch (error) {
         console.error('Error validando perfil en AuthGuard', error);
         setErrorPerfil('No se pudo cargar tu perfil o grupo. Intentá cerrar sesión e ingresar nuevamente.');
@@ -107,7 +112,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       ) : null}
-      {email && !RUTAS_PUBLICAS.has(pathname) ? <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600">Grupo activo · Sesión: {email}</div> : null}
+      {email && !RUTAS_PUBLICAS.has(pathname) ? <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600">Grupo activo: {nombreGrupo ?? 'Grupo activo'} · Sesión: {email}</div> : null}
       {children}
     </div>
   );

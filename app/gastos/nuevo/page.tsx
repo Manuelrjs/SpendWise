@@ -3,6 +3,7 @@
 import { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
+import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
 import { MENSAJE_ERROR_BUCKET_COMPROBANTES, normalizarNombreArchivo, validarComprobante } from '@/lib/comprobantes';
 import { DatosComprobanteSugeridos, extraerDatosComprobante } from '@/lib/ia/extraer-comprobante';
 import {
@@ -56,13 +57,13 @@ function crearNombreComprobantePegado() {
   return `comprobante-pegado-${yyyy}-${mm}-${dd}-${hh}${min}.png`;
 }
 
-async function obtenerFamiliaIdActual() {
+async function obtenerGrupoIdActual() {
   const { data: authData } = await supabase.auth.getUser();
   const userId = authData.user?.id;
   if (!userId) throw new Error('No hay sesión activa.');
-  const { data, error } = await supabase.from('perfiles').select('familia_id').eq('id', userId).maybeSingle();
-  if (error || !data?.familia_id) throw new Error('No se pudo cargar tu perfil. Cerrá sesión e intentá nuevamente.');
-  return data.familia_id as string;
+  const { data, error } = await supabase.from('perfiles').select('grupo_id').eq('id', userId).maybeSingle();
+  if (error || !data?.grupo_id) throw new Error('No se pudo cargar tu perfil. Cerrá sesión e intentá nuevamente.');
+  return data.grupo_id as string;
 }
 
 function normalizarNombreCategoria(nombre: string) {
@@ -408,7 +409,7 @@ export default function Page() {
       if (eg || !gasto) throw new Error('No se pudo guardar el gasto.');
       gastoCreadoId = gasto.id;
 
-      const familiaId = await obtenerFamiliaIdActual();
+      const familiaId = await obtenerGrupoIdActual();
 
       if (comprobante) {
         const fechaComprobante = formulario.fecha_gasto ? new Date(`${formulario.fecha_gasto}T00:00:00`) : new Date();
