@@ -16,6 +16,21 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const [errorPerfil, setErrorPerfil] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
 
+  const repararPerfil = async (session: Session | null) => {
+    if (!session) return;
+    setCargandoPerfil(true);
+    setErrorPerfil(null);
+    try {
+      await ensureUserProfile(session.user);
+      router.refresh();
+    } catch (error) {
+      console.error('Error reparando perfil desde botón', error);
+      setErrorPerfil('No se pudo cargar tu perfil o grupo. Revisá la migración y volvé a intentar.');
+    } finally {
+      setCargandoPerfil(false);
+    }
+  };
+
   useEffect(() => {
     let mounted = true;
 
@@ -41,7 +56,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         await ensureUserProfile(session.user);
       } catch (error) {
         console.error('Error validando perfil en AuthGuard', error);
-        setErrorPerfil('No se pudo cargar tu perfil. Intentá cerrar sesión e ingresar nuevamente.');
+        setErrorPerfil('No se pudo cargar tu perfil o grupo. Intentá cerrar sesión e ingresar nuevamente.');
       } finally {
         if (mounted) setCargandoPerfil(false);
       }
@@ -78,9 +93,21 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   return (
     <div>
       {errorPerfil && !RUTAS_PUBLICAS.has(pathname) ? (
-        <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{errorPerfil}</div>
+        <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+          <p>{errorPerfil}</p>
+          <button
+            type="button"
+            onClick={async () => {
+              const { data } = await supabase.auth.getSession();
+              await repararPerfil(data.session);
+            }}
+            className="mt-2 rounded-md border border-rose-300 bg-white px-3 py-1 font-medium text-rose-700 hover:bg-rose-100"
+          >
+            Crear mi perfil
+          </button>
+        </div>
       ) : null}
-      {email && !RUTAS_PUBLICAS.has(pathname) ? <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600">Sesión activa: {email}</div> : null}
+      {email && !RUTAS_PUBLICAS.has(pathname) ? <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600">Grupo activo · Sesión: {email}</div> : null}
       {children}
     </div>
   );

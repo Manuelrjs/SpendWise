@@ -3,28 +3,33 @@ import { supabase } from '@/lib/supabase/client';
 
 type Perfil = {
   id: string;
-  familia_id: string | null;
+  grupo_id: string | null;
   email: string | null;
 };
 
-const ERROR_PERFIL = 'No se pudo cargar tu perfil. Intentá cerrar sesión e ingresar nuevamente.';
+const ERROR_PERFIL = 'No se pudo cargar tu perfil o grupo. Intentá nuevamente.';
 
-function nombreFamiliaPorDefecto(email?: string | null) {
+function nombreGrupoPorDefecto(email?: string | null) {
   const base = email?.split('@')[0]?.trim();
-  return base ? `Familia de ${base}` : 'Mi familia';
+  return base ? `Grupo de ${base}` : 'Grupo de gastos';
 }
 
-async function crearFamiliaPorDefecto(email?: string | null) {
+function nombrePerfilPorDefecto(user: User) {
+  return user.user_metadata?.nombre ?? user.email?.split('@')[0] ?? 'Usuario';
+}
+
+async function crearGrupoPorDefecto(email?: string | null) {
   const { data, error } = await supabase
-    .from('familias')
-    .insert({ nombre: nombreFamiliaPorDefecto(email) })
+    .from('grupos')
+    .insert({ nombre: nombreGrupoPorDefecto(email) })
     .select('id')
     .single();
 
   if (error || !data?.id) {
-    console.error('Error creando familia por defecto', {
+    console.error('Error creando grupo por defecto', {
       code: error?.code,
       message: error?.message,
+      details: error?.details,
     });
     throw new Error(ERROR_PERFIL);
   }
@@ -35,41 +40,43 @@ async function crearFamiliaPorDefecto(email?: string | null) {
 export async function ensureUserProfile(user: User): Promise<Perfil> {
   const { data: perfilActual, error: errorPerfilActual } = await supabase
     .from('perfiles')
-    .select('id,familia_id,email')
+    .select('id,grupo_id,email')
     .eq('id', user.id)
     .maybeSingle();
 
   if (errorPerfilActual) {
-    console.error('Error cargando perfil', {
+    console.error('Error cargando perfil actual', {
       code: errorPerfilActual.code,
       message: errorPerfilActual.message,
+      details: errorPerfilActual.details,
     });
     throw new Error(ERROR_PERFIL);
   }
 
-  if (perfilActual?.familia_id) {
+  if (perfilActual?.grupo_id) {
     return perfilActual;
   }
 
-  const familiaId = await crearFamiliaPorDefecto(user.email);
+  const grupoId = await crearGrupoPorDefecto(user.email);
 
   if (!perfilActual) {
     const { data: perfilCreado, error: errorPerfilCreado } = await supabase
       .from('perfiles')
       .insert({
         id: user.id,
-        familia_id: familiaId,
+        grupo_id: grupoId,
         email: user.email ?? null,
-        nombre: user.user_metadata?.nombre ?? user.email?.split('@')[0] ?? 'Usuario',
+        nombre: nombrePerfilPorDefecto(user),
         rol: 'admin',
       })
-      .select('id,familia_id,email')
+      .select('id,grupo_id,email')
       .single();
 
     if (errorPerfilCreado || !perfilCreado) {
       console.error('Error creando perfil', {
         code: errorPerfilCreado?.code,
         message: errorPerfilCreado?.message,
+        details: errorPerfilCreado?.details,
       });
       throw new Error(ERROR_PERFIL);
     }
@@ -79,15 +86,16 @@ export async function ensureUserProfile(user: User): Promise<Perfil> {
 
   const { data: perfilActualizado, error: errorPerfilActualizado } = await supabase
     .from('perfiles')
-    .update({ familia_id: familiaId, email: perfilActual.email ?? user.email ?? null })
+    .update({ grupo_id: grupoId, email: perfilActual.email ?? user.email ?? null })
     .eq('id', user.id)
-    .select('id,familia_id,email')
+    .select('id,grupo_id,email')
     .single();
 
   if (errorPerfilActualizado || !perfilActualizado) {
-    console.error('Error actualizando perfil con familia', {
+    console.error('Error actualizando perfil sin grupo', {
       code: errorPerfilActualizado?.code,
       message: errorPerfilActualizado?.message,
+      details: errorPerfilActualizado?.details,
     });
     throw new Error(ERROR_PERFIL);
   }
