@@ -7,6 +7,8 @@ type Perfil = {
   email: string | null;
 };
 
+let creacionPerfilEnCurso: Promise<Perfil> | null = null;
+
 const ERROR_PERFIL = 'No se pudo cargar tu perfil o grupo. Intentá nuevamente.';
 
 function nombreGrupoPorDefecto(email?: string | null) {
@@ -38,6 +40,13 @@ async function crearGrupoPorDefecto(email?: string | null) {
 }
 
 export async function ensureUserProfile(user: User): Promise<Perfil> {
+  if (!user.id || !user.email) {
+    throw new Error('La sesión no tiene id/email válidos para crear el perfil.');
+  }
+
+  if (creacionPerfilEnCurso) return creacionPerfilEnCurso;
+
+  creacionPerfilEnCurso = (async () => {
   const { data: perfilActual, error: errorPerfilActual } = await supabase
     .from('perfiles')
     .select('id,grupo_id,email')
@@ -78,6 +87,7 @@ export async function ensureUserProfile(user: User): Promise<Perfil> {
         message: errorPerfilCreado?.message,
         details: errorPerfilCreado?.details,
       });
+      console.error('Grupo creado sin perfil asociado. Marcar para limpieza manual en mantenimiento.', { grupoId, userId: user.id, email: user.email });
       throw new Error(ERROR_PERFIL);
     }
 
@@ -101,4 +111,11 @@ export async function ensureUserProfile(user: User): Promise<Perfil> {
   }
 
   return perfilActualizado;
+  })();
+
+  try {
+    return await creacionPerfilEnCurso;
+  } finally {
+    creacionPerfilEnCurso = null;
+  }
 }
