@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
@@ -17,6 +17,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const [errorPerfil, setErrorPerfil] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [nombreGrupo, setNombreGrupo] = useState<string | null>(null);
+  const ejecucionEnCurso = useRef(false);
 
   const repararPerfil = async (session: Session | null) => {
     if (!session) return;
@@ -52,6 +53,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         router.replace('/');
       }
 
+      if (ejecucionEnCurso.current) return;
+      ejecucionEnCurso.current = true;
       setCargandoPerfil(true);
       setErrorPerfil(null);
 
@@ -63,6 +66,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         console.error('Error validando perfil en AuthGuard', error);
         setErrorPerfil('No se pudo cargar tu perfil o grupo. Intentá cerrar sesión e ingresar nuevamente.');
       } finally {
+        ejecucionEnCurso.current = false;
         if (mounted) setCargandoPerfil(false);
       }
     };
@@ -106,9 +110,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
               const { data } = await supabase.auth.getSession();
               await repararPerfil(data.session);
             }}
-            className="mt-2 rounded-md border border-rose-300 bg-white px-3 py-1 font-medium text-rose-700 hover:bg-rose-100"
-          >
-            Crear mi perfil
+            disabled={cargandoPerfil}
+            className="mt-2 rounded-md border border-rose-300 bg-white px-3 py-1 font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+>
+            {cargandoPerfil ? 'Creando perfil...' : 'Crear mi perfil'}
           </button>
         </div>
       ) : null}

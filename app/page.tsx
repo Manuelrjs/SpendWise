@@ -117,6 +117,9 @@ export default function DashboardPage() {
     const { inicio, fin } = obtenerLimitesMes(periodo);
     const proximoPeriodo = obtenerSiguientePeriodo(periodo);
 
+    const perfil = await obtenerPerfilActivo();
+    if (process.env.NODE_ENV !== 'production') console.debug('[dashboard] grupo activo', { email: perfil.email, grupo_id: perfil.grupo_id });
+
     const [
       gastosRes,
       cuotasMesRes,
@@ -132,22 +135,25 @@ export default function DashboardPage() {
         .select('id,monto,fecha_gasto,establecimiento,estado_registro,categoria_id,medio_pago_id,persona_id')
         .neq('estado_registro', 'anulado')
         .gte('fecha_gasto', inicio)
-        .lte('fecha_gasto', fin),
+        .lte('fecha_gasto', fin)
+        .eq('grupo_id', perfil.grupo_id),
       supabase
         .from('cuotas_tarjeta')
         .select('id,monto_cuota,periodo_pago_estimado,estado,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,establecimiento,descripcion_cuota,numero_cuota,total_cuotas,origen_cuota,observaciones')
         .eq('periodo_pago_estimado', periodo)
-        .not('estado', 'in', `(${ESTADOS_CUOTA_EXCLUIDOS.join(',')})`),
+        .not('estado', 'in', `(${ESTADOS_CUOTA_EXCLUIDOS.join(',')})`)
+        .eq('grupo_id', perfil.grupo_id),
       supabase
         .from('cuotas_tarjeta')
         .select('id,monto_cuota,periodo_pago_estimado,estado,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,establecimiento,descripcion_cuota,numero_cuota,total_cuotas,origen_cuota,observaciones')
         .eq('periodo_pago_estimado', proximoPeriodo)
-        .not('estado', 'in', `(${ESTADOS_CUOTA_EXCLUIDOS.join(',')})`),
-      supabase.from('categorias').select('id,nombre'),
-      supabase.from('medios_pago').select('id,nombre'),
-      supabase.from('personas').select('id,nombre,apellido'),
-      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta'),
-      supabase.from('tarjetas_fisicas').select('id,alias,ultimos_4_digitos'),
+        .not('estado', 'in', `(${ESTADOS_CUOTA_EXCLUIDOS.join(',')})`)
+        .eq('grupo_id', perfil.grupo_id),
+      supabase.from('categorias').select('id,nombre').eq('grupo_id', perfil.grupo_id),
+      supabase.from('medios_pago').select('id,nombre').eq('grupo_id', perfil.grupo_id),
+      supabase.from('personas').select('id,nombre,apellido').eq('grupo_id', perfil.grupo_id),
+      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta').eq('grupo_id', perfil.grupo_id),
+      supabase.from('tarjetas_fisicas').select('id,alias,ultimos_4_digitos').eq('grupo_id', perfil.grupo_id),
     ]);
 
     if (
