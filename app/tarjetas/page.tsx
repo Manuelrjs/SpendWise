@@ -42,11 +42,13 @@ export default function Page() {
   }, [cuentaSeleccionadaTarjeta, tarjetaEditandoId]);
 
   async function cargarDatos() {
+    const perfil = await obtenerPerfilActivo();
+    if (process.env.NODE_ENV !== 'production') console.debug('[tarjetas]', { email: perfil.email, grupo_id: perfil.grupo_id });
     setCargando(true); setMensaje(null);
     const [{ data: dataPersonas, error: errorPersonas }, { data: dataCuentas, error: errorCuentas }, { data: dataTarjetas, error: errorTarjetas }] = await Promise.all([
-      supabase.from('personas').select('id, nombre, apellido, activo').order('nombre', { ascending: true }),
-      supabase.from('cuentas_tarjeta').select('id, nombre_cuenta, banco, marca, persona_titular_id, activo, color_ui, icono_ui, dia_cierre_habitual, dias_hasta_vencimiento, observaciones, creado_en, persona_titular:personas(id, nombre, apellido, activo)').order('creado_en', { ascending: false }),
-      supabase.from('tarjetas_fisicas').select('id, cuenta_tarjeta_id, persona_id, tipo, nombre_en_tarjeta, alias, ultimos_4_digitos, activo, observaciones, creado_en, persona:personas(id, nombre, apellido, activo)').order('creado_en', { ascending: false }),
+      supabase.from('personas').select('id, nombre, apellido, activo').eq('grupo_id', perfil.grupo_id).order('nombre', { ascending: true }),
+      supabase.from('cuentas_tarjeta').select('id, nombre_cuenta, banco, marca, persona_titular_id, activo, color_ui, icono_ui, dia_cierre_habitual, dias_hasta_vencimiento, observaciones, creado_en, persona_titular:personas(id, nombre, apellido, activo)').eq('grupo_id', perfil.grupo_id).order('creado_en', { ascending: false }),
+      supabase.from('tarjetas_fisicas').select('id, cuenta_tarjeta_id, persona_id, tipo, nombre_en_tarjeta, alias, ultimos_4_digitos, activo, observaciones, creado_en, persona:personas(id, nombre, apellido, activo)').eq('grupo_id', perfil.grupo_id).order('creado_en', { ascending: false }),
     ]);
     if (errorPersonas || errorCuentas || errorTarjetas) { setMensaje({ tipo: 'error', texto: 'No se pudo cargar la información de tarjetas.' }); setCargando(false); return; }
     setPersonas(dataPersonas ?? []); setCuentas((dataCuentas as CuentaTarjeta[]) ?? []); setTarjetas((dataTarjetas as TarjetaFisica[]) ?? []); setCargando(false);
@@ -75,7 +77,7 @@ export default function Page() {
 
     setGuardandoCuenta(true);
     const payload = { nombre_cuenta: nombre, banco: formCuenta.banco.trim() || null, marca: formCuenta.marca.trim() || null, persona_titular_id: formCuenta.persona_titular_id, color_ui: formCuenta.color_ui.trim() || null, icono_ui: formCuenta.icono_ui.trim() || null, dia_cierre_habitual: dia, dias_hasta_vencimiento: diasVenc, observaciones: formCuenta.observaciones.trim() || null, actualizado_en: new Date().toISOString() };
-    const respuesta = cuentaEditandoId ? await supabase.from('cuentas_tarjeta').update(payload).eq('id', cuentaEditandoId) : await supabase.from('cuentas_tarjeta').insert(payload);
+    const respuesta = cuentaEditandoId ? await supabase.from('cuentas_tarjeta').update(payload).eq('id', cuentaEditandoId) : await supabase.from('cuentas_tarjeta').insert({ ...payload, grupo_id: (await obtenerPerfilActivo()).grupo_id });
     if (respuesta.error) { setMensaje({ tipo: 'error', texto: 'No se pudo guardar la cuenta de tarjeta.' }); setGuardandoCuenta(false); return; }
     setMensaje({ tipo: 'ok', texto: cuentaEditandoId ? 'Cuenta de tarjeta actualizada.' : 'Cuenta de tarjeta creada.' }); setGuardandoCuenta(false); limpiarCuenta(); await cargarDatos();
   }
@@ -90,7 +92,7 @@ export default function Page() {
 
     setGuardandoTarjeta(true);
     const payload = { cuenta_tarjeta_id: formTarjeta.cuenta_tarjeta_id, persona_id: formTarjeta.persona_id, tipo: formTarjeta.tipo, nombre_en_tarjeta: formTarjeta.nombre_en_tarjeta.trim() || null, alias: formTarjeta.alias.trim() || null, ultimos_4_digitos: ultimos4 || null, observaciones: formTarjeta.observaciones.trim() || null, actualizado_en: new Date().toISOString() };
-    const respuesta = tarjetaEditandoId ? await supabase.from('tarjetas_fisicas').update(payload).eq('id', tarjetaEditandoId) : await supabase.from('tarjetas_fisicas').insert(payload);
+    const respuesta = tarjetaEditandoId ? await supabase.from('tarjetas_fisicas').update(payload).eq('id', tarjetaEditandoId) : await supabase.from('tarjetas_fisicas').insert({ ...payload, grupo_id: (await obtenerPerfilActivo()).grupo_id });
     if (respuesta.error) { setMensaje({ tipo: 'error', texto: 'No se pudo guardar la tarjeta física.' }); setGuardandoTarjeta(false); return; }
     setMensaje({ tipo: 'ok', texto: tarjetaEditandoId ? 'Tarjeta física actualizada.' : 'Tarjeta física creada.' }); setGuardandoTarjeta(false); cerrarModalTarjeta(); await cargarDatos();
   }
