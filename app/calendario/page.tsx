@@ -119,6 +119,8 @@ function origenLegible(origen: OrigenFecha) {
 }
 
 export default function Page() {
+  const [grupoId, setGrupoId] = useState<string | null>(null);
+  const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [cuentas, setCuentas] = useState<CuentaTarjeta[]>([]);
   const [calendarios, setCalendarios] = useState<CalendarioTarjeta[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -147,6 +149,7 @@ export default function Page() {
   const hayDuplicadosVisibles = useMemo(() => calendariosCuenta.some((item) => esDuplicado(item)), [calendariosCuenta, calendarios]);
 
   async function cargarDatos() {
+    if (!grupoId) return;
     setCargando(true);
     setMensaje(null);
 
@@ -296,7 +299,7 @@ export default function Page() {
 
     const respuesta = calendarioEditandoId
       ? await supabase.from('calendario_tarjetas').update(payload).eq('id', calendarioEditandoId)
-      : await supabase.from('calendario_tarjetas').insert(payload);
+      : await supabase.from('calendario_tarjetas').insert({ ...payload, grupo_id: grupoId });
 
     if (respuesta.error) {
       setMensaje({ tipo: 'error', texto: 'No se pudo guardar el período de calendario.' });

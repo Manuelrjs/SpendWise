@@ -171,18 +171,19 @@ export default function FlujoPage() {
   }, []);
 
   async function cargarDatos() {
+    if (!grupoId) return;
     setCargando(true);
     setError(null);
 
     const [cuentasRes, personasRes, tarjetasRes, cuotasRes, mediosPagoRes, gastosRes] = await Promise.all([
       supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,activo').eq('activo', true).order('nombre_cuenta'),
-      supabase.from('personas').select('id,nombre,apellido').order('nombre'),
+      supabase.from('personas').select('id,nombre,apellido').eq('grupo_id', grupoId).order('nombre'),
       supabase.from('tarjetas_fisicas').select('id,alias,tipo,ultimos_4_digitos').order('alias'),
       supabase
         .from('cuotas_tarjeta')
         .select('id,gasto_id,compra_cuota_inicial_id,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,establecimiento,descripcion_cuota,numero_cuota,total_cuotas,monto_cuota,moneda,periodo_pago_estimado,estado,origen_cuota,observaciones')
         .not('estado', 'in', '(cancelada)'),
-      supabase.from('medios_pago').select('id,nombre,tipo,activo').eq('activo', true).order('nombre'),
+      supabase.from('medios_pago').select('id,nombre,tipo,activo').eq('activo', true).eq('grupo_id', grupoId).order('nombre'),
       supabase
         .from('gastos')
         .select('id,fecha_gasto,monto,moneda,establecimiento,descripcion,observaciones,persona_id,medio_pago_id,estado_registro,categoria:categorias(nombre),persona:personas(nombre,apellido),medio_pago:medios_pago(nombre,tipo)')

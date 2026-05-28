@@ -38,6 +38,8 @@ function formatearFecha(fechaIso: string) {
 }
 
 export default function Page() {
+  const [grupoId, setGrupoId] = useState<string | null>(null);
+  const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
@@ -52,12 +54,14 @@ export default function Page() {
   );
 
   async function cargarPersonas() {
+    if (!grupoId) return;
     setCargando(true);
     setMensaje(null);
 
     const { data, error } = await supabase
       .from('personas')
       .select('id, nombre, apellido, email, relacion_familiar, activo, creado_en, actualizado_en')
+      .eq('grupo_id', grupoId)
       .order('creado_en', { ascending: false });
 
     if (error) {
@@ -67,10 +71,21 @@ export default function Page() {
     }
 
     setPersonas(data ?? []);
+    if (process.env.NODE_ENV !== "production") console.debug("[debug] /personas", { pantalla: "/personas", email: usuarioEmail, grupo_id: grupoId, registros: (data ?? []).length });
     setCargando(false);
   }
 
   useEffect(() => {
+    (async () => {
+      const perfil = await obtenerPerfilActivo();
+      setGrupoId(perfil.grupo_id);
+      const { data: authData } = await supabase.auth.getUser();
+      setUsuarioEmail(authData.user?.email ?? null);
+    })();
+  }, [grupoId]);
+
+  useEffect(() => {
+    if (!grupoId) return;
     void cargarPersonas();
   }, []);
 
@@ -115,8 +130,8 @@ export default function Page() {
     };
 
     const respuesta = personaEditandoId
-      ? await supabase.from('personas').update(payload).eq('id', personaEditandoId)
-      : await supabase.from('personas').insert(payload);
+      ? await supabase.from('personas').update(payload).eq('id', personaEditandoId).eq('grupo_id', grupoId)
+      : await supabase.from('personas').insert({ ...payload, grupo_id: grupoId });
 
     if (respuesta.error) {
       setMensaje({ tipo: 'error', texto: 'No se pudo guardar la persona.' });
@@ -139,7 +154,7 @@ export default function Page() {
     const { error } = await supabase
       .from('personas')
       .update({ activo: proximoEstado, actualizado_en: new Date().toISOString() })
-      .eq('id', persona.id);
+      .eq('id', persona.id).eq('grupo_id', grupoId);
 
     if (error) {
       setMensaje({

@@ -42,6 +42,8 @@ function formatearFecha(fechaIso: string) {
 }
 
 export default function Page() {
+  const [grupoId, setGrupoId] = useState<string | null>(null);
+  const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [mediosPago, setMediosPago] = useState<MedioPago[]>([]);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
@@ -53,12 +55,14 @@ export default function Page() {
   const tituloFormulario = useMemo(() => (medioPagoEditandoId ? 'Editar medio de pago' : 'Nuevo medio de pago'), [medioPagoEditandoId]);
 
   async function cargarMediosPago() {
+    if (!grupoId) return;
     setCargando(true);
     setMensaje(null);
 
     const { data, error } = await supabase
       .from('medios_pago')
       .select('id, nombre, tipo, activo, orden, creado_en, actualizado_en')
+      .eq('grupo_id', grupoId)
       .order('orden', { ascending: true, nullsFirst: false })
       .order('creado_en', { ascending: false });
 
@@ -68,11 +72,23 @@ export default function Page() {
       return;
     }
 
-    setMediosPago((data ?? []).filter((medio): medio is MedioPago => TIPOS_MEDIO_PAGO.includes(medio.tipo as TipoMedioPago)));
+    const mediosFiltrados = (data ?? []).filter((medio): medio is MedioPago => TIPOS_MEDIO_PAGO.includes(medio.tipo as TipoMedioPago));
+    setMediosPago(mediosFiltrados);
+    if (process.env.NODE_ENV !== "production") console.debug("[debug] /medios-pago", { pantalla: "/medios-pago", email: usuarioEmail, grupo_id: grupoId, registros: mediosFiltrados.length });
     setCargando(false);
   }
 
   useEffect(() => {
+    (async () => {
+      const perfil = await obtenerPerfilActivo();
+      setGrupoId(perfil.grupo_id);
+      const { data: authData } = await supabase.auth.getUser();
+      setUsuarioEmail(authData.user?.email ?? null);
+    })();
+  }, [grupoId]);
+
+  useEffect(() => {
+    if (!grupoId) return;
     void cargarMediosPago();
   }, []);
 
@@ -102,8 +118,8 @@ export default function Page() {
 
     const payload = { nombre: nombreLimpio, tipo: formulario.tipo, orden: ordenNumero, actualizado_en: new Date().toISOString() };
     const respuesta = medioPagoEditandoId
-      ? await supabase.from('medios_pago').update(payload).eq('id', medioPagoEditandoId)
-      : await supabase.from('medios_pago').insert(payload);
+      ? await supabase.from('medios_pago').update(payload).eq('id', medioPagoEditandoId).eq('grupo_id', grupoId)
+      : await supabase.from('medios_pago').insert({ ...payload, grupo_id: grupoId });
 
     if (respuesta.error) {
       setMensaje({ tipo: 'error', texto: 'No se pudo guardar el medio de pago.' });
@@ -119,7 +135,7 @@ export default function Page() {
 
   async function cambiarEstadoMedioPago(medioPago: MedioPago, proximoEstado: boolean) {
     setMensaje(null);
-    const { error } = await supabase.from('medios_pago').update({ activo: proximoEstado, actualizado_en: new Date().toISOString() }).eq('id', medioPago.id);
+    const { error } = await supabase.from('medios_pago').update({ activo: proximoEstado, actualizado_en: new Date().toISOString() }).eq('id', medioPago.id).eq('grupo_id', grupoId);
     if (error) {
       setMensaje({ tipo: 'error', texto: proximoEstado ? 'No se pudo reactivar el medio de pago.' : 'No se pudo desactivar el medio de pago.' });
       return;
