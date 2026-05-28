@@ -239,12 +239,26 @@ Tablas operativas con `grupo_id`:
 - `compras_cuotas_iniciales`
 - `comprobantes`
 
-Pasos:
+### Corrección urgente de columnas faltantes
 
-1. Ejecutar migración `supabase/migrations/005_add_grupo_id_to_operational_tables.sql`.
-2. Verificar que existe al menos un registro en `grupos`.
-3. Ejecutar el backfill incluido en la misma migración para asignar `grupo_id` a datos existentes.
+1. Ir a **Supabase → SQL Editor**.
+2. Abrir el archivo `supabase/migrations/007_fix_grupo_id_operational_tables.sql`.
+3. Ejecutar **todo** el contenido SQL de la migración.
+4. Confirmar que cada tabla operativa listada tenga la columna `grupo_id`.
+5. Confirmar que los datos existentes con `grupo_id` nulo hayan sido asignados al grupo default (el grupo más antiguo por `creado_en`).
+6. Probar el Dashboard.
 
-> Importante: Después de aplicar la migración, ejecutar backfill para asignar datos existentes al grupo actual.
+### Verificación sugerida en Supabase
 
-Por ahora el aislamiento queda aplicado desde la app (filtros por `grupo_id`) + índices. La RLS operativa estricta y soporte multi-grupo quedan para una tarea posterior.
+- En **Table Editor**, abrir cada tabla operativa y verificar la presencia de `grupo_id`.
+- En **SQL Editor**, validar backfill con consultas como:
+
+```sql
+select count(*) as pendientes_sin_grupo from public.gastos where grupo_id is null;
+select count(*) as pendientes_sin_grupo from public.cuotas_tarjeta where grupo_id is null;
+select count(*) as pendientes_sin_grupo from public.calendario_tarjetas where grupo_id is null;
+```
+
+Si los conteos dan `0`, el backfill quedó aplicado para esas tablas.
+
+> Importante: este backfill es solo para datos históricos de desarrollo. No debe moverse a `ensureUserProfile` ni ejecutarse en cada login.
