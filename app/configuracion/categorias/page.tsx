@@ -38,6 +38,8 @@ function formatearFecha(fechaIso: string) {
 }
 
 export default function Page() {
+  const [grupoId, setGrupoId] = useState<string | null>(null);
+  const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
@@ -52,12 +54,14 @@ export default function Page() {
   );
 
   async function cargarCategorias() {
+    if (!grupoId) return;
     setCargando(true);
     setMensaje(null);
 
     const { data, error } = await supabase
       .from('categorias')
       .select('id, nombre, icono, color, activo, orden, creado_en, actualizado_en')
+      .eq('grupo_id', grupoId)
       .order('orden', { ascending: true, nullsFirst: false })
       .order('creado_en', { ascending: false });
 
@@ -68,10 +72,21 @@ export default function Page() {
     }
 
     setCategorias(data ?? []);
+    if (process.env.NODE_ENV !== "production") console.debug("[debug] /categorias", { pantalla: "/categorias", email: usuarioEmail, grupo_id: grupoId, registros: (data ?? []).length });
     setCargando(false);
   }
 
   useEffect(() => {
+    (async () => {
+      const perfil = await obtenerPerfilActivo();
+      setGrupoId(perfil.grupo_id);
+      const { data: authData } = await supabase.auth.getUser();
+      setUsuarioEmail(authData.user?.email ?? null);
+    })();
+  }, [grupoId]);
+
+  useEffect(() => {
+    if (!grupoId) return;
     void cargarCategorias();
   }, []);
 
@@ -123,8 +138,8 @@ export default function Page() {
     };
 
     const respuesta = categoriaEditandoId
-      ? await supabase.from('categorias').update(payload).eq('id', categoriaEditandoId)
-      : await supabase.from('categorias').insert(payload);
+      ? await supabase.from('categorias').update(payload).eq('id', categoriaEditandoId).eq('grupo_id', grupoId)
+      : await supabase.from('categorias').insert({ ...payload, grupo_id: grupoId });
 
     if (respuesta.error) {
       setMensaje({ tipo: 'error', texto: 'No se pudo guardar la categoría.' });
@@ -144,7 +159,7 @@ export default function Page() {
     const { error } = await supabase
       .from('categorias')
       .update({ activo: proximoEstado, actualizado_en: new Date().toISOString() })
-      .eq('id', categoria.id);
+      .eq('id', categoria.id).eq('grupo_id', grupoId);
 
     if (error) {
       setMensaje({

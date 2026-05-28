@@ -37,6 +37,8 @@ const MENSAJE_CUOTA_NO_EDITABLE = 'Esta cuota no puede modificarse porque ya est
 const inicial: Formulario = { fecha_compra_original: '', establecimiento: '', descripcion_compra: '', cuenta_tarjeta_id: '', tarjeta_fisica_id: '', persona_id: '', cuota_inicio_pendiente: 1, total_cuotas: 1, monto_cuota: '', moneda: 'ARS', periodo_inicio_pago: '', categoria_id: '', observaciones: '' };
 
 export default function Page() {
+  const [grupoId, setGrupoId] = useState<string | null>(null);
+  const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [formulario, setFormulario] = useState<Formulario>(inicial);
   const [cuentas, setCuentas] = useState<CuentaTarjeta[]>([]);
   const [tarjetas, setTarjetas] = useState<TarjetaFisica[]>([]);
@@ -69,7 +71,8 @@ export default function Page() {
     return Array.from({ length: longitud }, (_, idx) => ({ numero: formulario.cuota_inicio_pendiente + idx, monto, periodo: periodosVistaPrevia[idx] ?? sumarMesesPeriodo(formulario.periodo_inicio_pago, idx) }));
   }, [formulario, periodosVistaPrevia]);
 
-  useEffect(() => { void cargarDatos(); }, []);
+  useEffect(() => { (async () => { const perfil = await obtenerPerfilActivo(); setGrupoId(perfil.grupo_id); const { data: authData } = await supabase.auth.getUser(); setUsuarioEmail(authData.user?.email ?? null); })(); }, []);
+  useEffect(() => { if (!grupoId) return; void cargarDatos(); }, [grupoId]);
   useEffect(() => {
     const longitud = formulario.total_cuotas - formulario.cuota_inicio_pendiente + 1;
     if (longitud <= 0 || !FORMATO_PERIODO.test(formulario.periodo_inicio_pago)) return setPeriodosVistaPrevia([]);
@@ -77,11 +80,12 @@ export default function Page() {
   }, [formulario.total_cuotas, formulario.cuota_inicio_pendiente, formulario.periodo_inicio_pago]);
 
   async function cargarDatos() {
+    if (!grupoId) return;
     const [ct, tf, p, c, ci] = await Promise.all([
       supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,banco,marca,dia_cierre_habitual,dias_hasta_vencimiento').eq('activo', true).order('nombre_cuenta'),
       supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,alias,tipo,ultimos_4_digitos').eq('activo', true),
-      supabase.from('personas').select('id,nombre,apellido').eq('activo', true).order('nombre'),
-      supabase.from('categorias').select('id,nombre').eq('activo', true).order('nombre'),
+      supabase.from('personas').select('id,nombre,apellido').eq('activo', true).eq('grupo_id', grupoId).order('nombre'),
+      supabase.from('categorias').select('id,nombre').eq('activo', true).eq('grupo_id', grupoId).order('nombre'),
       supabase.from('compras_cuotas_iniciales').select('id,fecha_compra_original,establecimiento,descripcion_compra,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,categoria_id,observaciones,cuota_inicio_pendiente,total_cuotas,monto_cuota,moneda,periodo_inicio_pago,estado').order('creado_en', { ascending: false }),
     ]);
     if (ct.error || tf.error || p.error || c.error || ci.error) return setError('No se pudieron cargar los datos de cuotas iniciales.');
@@ -111,7 +115,7 @@ export default function Page() {
       if (errorCompra || !compra) throw new Error('No se pudo guardar la compra de cuotas iniciales.');
 
       const cuotas = vistaPrevia.map((fila) => ({ compra_cuota_inicial_id: compra.id, gasto_id: null, cuenta_tarjeta_id: formulario.cuenta_tarjeta_id, tarjeta_fisica_id: formulario.tarjeta_fisica_id || null, persona_id: formulario.persona_id, establecimiento: formulario.establecimiento.trim(), descripcion_cuota: formulario.descripcion_compra.trim() || formulario.establecimiento.trim(), numero_cuota: fila.numero, total_cuotas: formulario.total_cuotas, monto_cuota: monto, moneda: formulario.moneda, periodo_pago_estimado: fila.periodo, estado: 'pendiente', origen_cuota: 'carga_inicial', observaciones: formulario.observaciones.trim() || null }));
-      const { error: errorCuotas } = await supabase.from('cuotas_tarjeta').insert(cuotas);
+      const { error: errorCuotas } = await supabase.from('cuotas_tarjeta').insert(cuotas.map((item) => ({ ...item, grupo_id: grupoId })));
       if (errorCuotas) throw new Error('Se guardó la compra inicial, pero falló la generación de cuotas.');
 
       setFormulario(inicial);

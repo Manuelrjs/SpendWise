@@ -71,6 +71,8 @@ function normalizarNombreCategoria(nombre: string) {
 }
 
 export default function Page() {
+  const [grupoId, setGrupoId] = useState<string | null>(null);
+  const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [formulario, setFormulario] = useState<Formulario>(inicial);
   const [medios, setMedios] = useState<MedioPago[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
@@ -106,7 +108,8 @@ export default function Page() {
   const esTarjetaCredito = medioSeleccionado?.tipo === 'tarjeta_credito';
   const tarjetasCuenta = useMemo(() => tarjetas.filter((t) => t.cuenta_tarjeta_id === formulario.cuenta_tarjeta_id), [tarjetas, formulario.cuenta_tarjeta_id]);
 
-  useEffect(() => { void cargarDatos(); }, []);
+  useEffect(() => { (async () => { const perfil = await obtenerPerfilActivo(); setGrupoId(perfil.grupo_id); const { data: authData } = await supabase.auth.getUser(); setUsuarioEmail(authData.user?.email ?? null); })(); }, []);
+  useEffect(() => { if (!grupoId) return; void cargarDatos(); }, [grupoId]);
   useEffect(() => {
     if (!esTarjetaCredito) {
       setFormulario((prev) => ({ ...prev, cuenta_tarjeta_id: '', tarjeta_fisica_id: '', cantidad_cuotas: 1 }));
@@ -160,16 +163,18 @@ export default function Page() {
   }, [modalCategoriaAbierto]);
 
   async function cargarDatos() {
+    if (!grupoId) return;
     const [m, c, p, ct, tf, cal] = await Promise.all([
-      supabase.from('medios_pago').select('id,nombre,tipo,activo,orden').eq('activo', true).order('orden'),
-      supabase.from('categorias').select('id,nombre,icono,color,activo,orden').eq('activo', true).order('orden'),
-      supabase.from('personas').select('id,nombre,apellido,activo').eq('activo', true).order('nombre'),
-      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,banco,marca,dia_cierre_habitual,dias_hasta_vencimiento,activo').eq('activo', true).order('nombre_cuenta'),
-      supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,alias,tipo,ultimos_4_digitos,activo').eq('activo', true),
-      supabase.from('calendario_tarjetas').select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones'),
+      supabase.from('medios_pago').select('id,nombre,tipo,activo,orden').eq('activo', true).eq('grupo_id', grupoId).order('orden'),
+      supabase.from('categorias').select('id,nombre,icono,color,activo,orden').eq('activo', true).eq('grupo_id', grupoId).order('orden'),
+      supabase.from('personas').select('id,nombre,apellido,activo').eq('activo', true).eq('grupo_id', grupoId).order('nombre'),
+      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,banco,marca,dia_cierre_habitual,dias_hasta_vencimiento,activo').eq('activo', true).eq('grupo_id', grupoId).order('nombre_cuenta'),
+      supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,alias,tipo,ultimos_4_digitos,activo').eq('activo', true).eq('grupo_id', grupoId),
+      supabase.from('calendario_tarjetas').select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones').eq('grupo_id', grupoId),
     ]);
     if ([m,c,p,ct,tf,cal].some((r) => r.error)) return setError('No se pudieron cargar los datos iniciales.');
     setMedios(m.data ?? []); setCategorias(c.data ?? []); setPersonas(p.data ?? []); setCuentas(ct.data ?? []); setTarjetas(tf.data ?? []); setCalendarios((cal.data ?? []) as CalendarioTarjeta[]);
+    if (process.env.NODE_ENV !== 'production') console.debug('[debug] /gastos/nuevo', { pantalla: '/gastos/nuevo', email: usuarioEmail, grupo_id: grupoId, registros: { medios: (m.data ?? []).length, categorias: (c.data ?? []).length, personas: (p.data ?? []).length, cuentas: (ct.data ?? []).length, tarjetas: (tf.data ?? []).length, calendarios: (cal.data ?? []).length } });
   }
 
   async function asegurarCalendario(cuenta: CuentaTarjeta, periodo: string) {
@@ -405,7 +410,7 @@ export default function Page() {
         }
       }
 
-      const { data: gasto, error: eg } = await supabase.from('gastos').insert(payload).select('id').single();
+      const { data: gasto, error: eg } = await supabase.from('gastos').insert({ ...payload, grupo_id: grupoId }).select('id').single();
       if (eg || !gasto) throw new Error('No se pudo guardar el gasto.');
       gastoCreadoId = gasto.id;
 
@@ -430,6 +435,7 @@ export default function Page() {
         }
 
         const { error: errorComprobante } = await supabase.from('comprobantes').insert({
+          grupo_id: grupoId,
           gasto_id: gasto.id,
           tipo_comprobante: comprobante.type === 'application/pdf' ? 'factura_pdf' : 'ticket_imagen',
           tipo_archivo: comprobante.type,
@@ -448,7 +454,7 @@ export default function Page() {
 
       if (esTarjetaCredito && cuotasPayload.length > 0) {
         const cuotasConGasto = cuotasPayload.map((cuota) => ({ ...cuota, gasto_id: gasto.id }));
-        const { error: ec } = await supabase.from('cuotas_tarjeta').insert(cuotasConGasto);
+        const { error: ec } = await supabase.from('cuotas_tarjeta').insert(cuotasConGasto.map((item) => ({ ...item, grupo_id: grupoId })));
         if (ec) throw new Error('No se pudo guardar el gasto con tarjeta. No se registró ningún gasto operativo.');
         if (usaronEstimados) setAdvertencia('Se usaron fechas estimadas de cierre/vencimiento. Podés confirmarlas luego desde Calendario.');
       }

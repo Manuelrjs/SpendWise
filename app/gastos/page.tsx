@@ -116,6 +116,8 @@ function etiquetaCuota(numeroCuota: number, totalCuotas: number) {
 
 
 export default function Page() {
+  const [grupoId, setGrupoId] = useState<string | null>(null);
+  const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [cuotas, setCuotas] = useState<CuotaTarjeta[]>([]);
   const [categorias, setCategorias] = useState<OpcionBase[]>([]);
@@ -138,7 +140,8 @@ export default function Page() {
   const inputSubirRef = useRef<HTMLInputElement | null>(null);
   const inputCamaraRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => { void cargarDatos(); }, []);
+  useEffect(() => { (async () => { const perfil = await obtenerPerfilActivo(); setGrupoId(perfil.grupo_id); const { data: authData } = await supabase.auth.getUser(); setUsuarioEmail(authData.user?.email ?? null); })(); }, []);
+  useEffect(() => { if (!grupoId) return; void cargarDatos(); }, [grupoId]);
 
   const nombresCategoria = useMemo(() => new Map(categorias.map((c) => [c.id, c.nombre])), [categorias]);
   const nombresMedioPago = useMemo(() => new Map(mediosPago.map((m) => [m.id, m.nombre])), [mediosPago]);
@@ -208,11 +211,12 @@ export default function Page() {
   }, [gastoEditando, tarjetasFisicas, tarjetasEtiquetas]);
 
   async function cargarDatos() {
+    if (!grupoId) return;
     const [g, c, m, p, ct, tf, cuotasRes, cal, comp] = await Promise.all([
       supabase.from('gastos').select('id,fecha_gasto,establecimiento,descripcion,observaciones,categoria_id,monto,moneda,medio_pago_id,persona_id,cuenta_tarjeta_id,tarjeta_fisica_id,cantidad_cuotas,estado_registro,creado_en').order('fecha_gasto', { ascending: false }),
-      supabase.from('categorias').select('id,nombre').order('nombre'),
-      supabase.from('medios_pago').select('id,nombre,tipo').order('nombre'),
-      supabase.from('personas').select('id,nombre,apellido').order('nombre'),
+      supabase.from('categorias').select('id,nombre').eq('grupo_id', grupoId).order('nombre'),
+      supabase.from('medios_pago').select('id,nombre,tipo').eq('grupo_id', grupoId).order('nombre'),
+      supabase.from('personas').select('id,nombre,apellido').eq('grupo_id', grupoId).order('nombre'),
       supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,dia_cierre_habitual,dias_hasta_vencimiento').order('nombre_cuenta'),
       supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,tipo,nombre_en_tarjeta,alias,ultimos_4_digitos,activo').order('id'),
       supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,motivo_modificacion'),
@@ -284,6 +288,7 @@ export default function Page() {
           console.log('[tarjeta][conversion][calculo]', { fecha_gasto: gastoEditando.fecha_gasto, dia_cierre_habitual: cuenta.dia_cierre_habitual, dias_hasta_vencimiento: cuenta.dias_hasta_vencimiento, periodo_resumen: resultadoPeriodo.periodo_resumen, fecha_cierre: resultadoPeriodo.fecha_cierre, fecha_vencimiento: resultadoPeriodo.fecha_vencimiento, periodo_pago_estimado: resultadoPeriodo.periodo_pago });
         }
         const { error: cuotaError } = await supabase.from('cuotas_tarjeta').insert({
+          grupo_id: grupoId,
           gasto_id: gastoEditando.id,
           compra_cuota_inicial_id: null,
           cuenta_tarjeta_id: gastoEditando.cuenta_tarjeta_id,
