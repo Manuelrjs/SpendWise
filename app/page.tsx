@@ -176,7 +176,12 @@ export default function DashboardPage() {
         cuentasRes.error ??
         tarjetasRes.error;
 
-      console.error(primerError);
+      console.error('[dashboard] error al cargar datos', {
+        message: primerError.message,
+        code: primerError.code,
+        details: primerError.details,
+        hint: primerError.hint,
+      });
       setError('No se pudo cargar el dashboard. Revisá la conexión con Supabase.');
       setCargando(false);
       return;
