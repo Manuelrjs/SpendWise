@@ -20,9 +20,11 @@ export default function Page(){
   const [cargando,setCargando]=useState(true); const [error,setError]=useState<string|null>(null);
 
   useEffect(()=>{void cargar();},[mes]);
-  async function cargar(){ setCargando(true); setError(null); const {desde,hasta}=rango(mes); const [g,c,m,p,ct,tf]=await Promise.all([
-    supabase.from('gastos').select('id,fecha_gasto,establecimiento,monto,moneda,categoria_id,medio_pago_id,persona_id,cuenta_tarjeta_id,tarjeta_fisica_id,estado_registro').gte('fecha_gasto',desde).lte('fecha_gasto',hasta),
-    supabase.from('categorias').select('id,nombre').order('nombre'), supabase.from('medios_pago').select('id,nombre').order('nombre'), supabase.from('personas').select('id,nombre,apellido').order('nombre'), supabase.from('cuentas_tarjeta').select('id,nombre_cuenta').order('nombre_cuenta'), supabase.from('tarjetas_fisicas').select('id,alias,ultimos_4_digitos,persona_id,cuenta_tarjeta_id').order('alias')
+  async function cargar(){ setCargando(true); setError(null); const perfil = await obtenerPerfilActivo();
+  if (process.env.NODE_ENV !== 'production') console.debug('[reportes]', { email: perfil.email, grupo_id: perfil.grupo_id });
+  const {desde,hasta}=rango(mes); const [g,c,m,p,ct,tf]=await Promise.all([
+    supabase.from('gastos').select('id,fecha_gasto,establecimiento,monto,moneda,categoria_id,medio_pago_id,persona_id,cuenta_tarjeta_id,tarjeta_fisica_id,estado_registro').gte('fecha_gasto',desde).lte('fecha_gasto',hasta).eq('grupo_id', perfil.grupo_id),
+    supabase.from('categorias').select('id,nombre').eq('grupo_id', perfil.grupo_id).order('nombre'), supabase.from('medios_pago').select('id,nombre').eq('grupo_id', perfil.grupo_id).order('nombre'), supabase.from('personas').select('id,nombre,apellido').eq('grupo_id', perfil.grupo_id).order('nombre'), supabase.from('cuentas_tarjeta').select('id,nombre_cuenta').eq('grupo_id', perfil.grupo_id).order('nombre_cuenta'), supabase.from('tarjetas_fisicas').select('id,alias,ultimos_4_digitos,persona_id,cuenta_tarjeta_id').eq('grupo_id', perfil.grupo_id).order('alias')
   ]); if(g.error||c.error||m.error||p.error||ct.error||tf.error){setError('No se pudieron cargar los reportes.');setCargando(false);return;} setGastos((g.data??[]) as Gasto[]); setCategorias((c.data??[]) as Opcion[]); setMedios((m.data??[]) as Opcion[]); setPersonas((p.data??[]) as Persona[]); setCuentas((ct.data??[]) as Cuenta[]); setTarjetas((tf.data??[]) as Tarjeta[]); setCargando(false);} 
 
   const nomCat=useMemo(()=>new Map(categorias.map(x=>[x.id,x.nombre])),[categorias]); const nomMed=useMemo(()=>new Map(medios.map(x=>[x.id,x.nombre])),[medios]); const nomPer=useMemo(()=>new Map(personas.map(x=>[x.id,`${x.nombre} ${x.apellido??''}`.trim()])),[personas]); const nomCue=useMemo(()=>new Map(cuentas.map(x=>[x.id,x.nombre_cuenta])),[cuentas]);
