@@ -4,7 +4,7 @@ import { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, useEffect, useMemo, 
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
-import { BUCKET_COMPROBANTES, MENSAJE_ERROR_BUCKET_COMPROBANTES, crearRutaStorageComprobante, validarComprobante } from '@/lib/comprobantes';
+import { BUCKET_COMPROBANTES, MENSAJE_ERROR_BUCKET_COMPROBANTES, crearRutaStorageComprobante, detectarTipoComprobante, obtenerNombreArchivoDesdeRuta, validarComprobante } from '@/lib/comprobantes';
 import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
 import { normalizarErrorTecnico, type ErrorTecnico } from '@/lib/errores';
 import { DatosComprobanteSugeridos, extraerDatosComprobante } from '@/lib/ia/extraer-comprobante';
@@ -422,7 +422,8 @@ export default function Page() {
           fechaGasto: formulario.fecha_gasto,
         });
 
-        const { error: errorStorage } = await supabase.storage.from(BUCKET_COMPROBANTES).upload(rutaStorage, comprobante, { upsert: false, contentType: comprobante.type });
+        console.debug('[SpendWise][comprobante] storage path', rutaStorage);
+        const { error: errorStorage } = await supabase.storage.from(BUCKET_COMPROBANTES).upload(rutaStorage, comprobante, { upsert: false, contentType: comprobante.type || undefined });
         if (errorStorage) {
           console.error(errorStorage);
           throw new Error(MENSAJE_ERROR_BUCKET_COMPROBANTES);
@@ -432,11 +433,11 @@ export default function Page() {
         const payloadComprobante = {
           gasto_id: gasto.id,
           grupo_id: grupoId,
-          nombre_archivo: comprobante.name,
-          tipo_archivo: comprobante.type,
-          mime_type: comprobante.type,
-          storage_path: rutaStorage,
-          tamaño_bytes: comprobante.size,
+          nombre_archivo: obtenerNombreArchivoDesdeRuta(rutaStorage),
+          tipo_comprobante: detectarTipoComprobante(comprobante),
+          ruta_storage: rutaStorage,
+          url_storage: null,
+          tamano_bytes: comprobante.size,
         };
         const { error: errorComprobante } = await supabase.from('comprobantes').insert(payloadComprobante);
         if (errorComprobante) {
@@ -450,7 +451,7 @@ export default function Page() {
             raw: errorComprobante,
           });
           setErrorTecnico({ ...detalle, raw: { error: errorComprobante, payload: payloadComprobante } });
-          console.warn('El archivo ya fue subido a Storage pero falló el insert de metadata.', { bucket: BUCKET_COMPROBANTES, storage_path: rutaStorage });
+          console.warn('El archivo ya fue subido a Storage pero falló el insert de metadata.', { bucket: BUCKET_COMPROBANTES, ruta_storage: rutaStorage });
           falloAsociacionComprobante = true;
         }
       }
@@ -459,10 +460,7 @@ export default function Page() {
         const cuotasConGasto = cuotasPayload.map((cuota) => ({ ...cuota, gasto_id: gasto.id }));
         const { error: ec } = await supabase.from('cuotas_tarjeta').insert(cuotasConGasto.map((item) => ({ ...item, grupo_id: grupoId })));
         if (ec) {
-          if (rutaStorageSubida) {
-            const { error: errorEliminar } = await supabase.storage.from(BUCKET_COMPROBANTES).remove([rutaStorageSubida]);
-            if (errorEliminar) console.warn('No se pudo eliminar el comprobante subido después de fallar el gasto con tarjeta.', errorEliminar);
-          }
+          if (rutaStorageSubida) console.warn('No se elimina el comprobante subido porque esta tarea no borra archivos de Storage.', { bucket: BUCKET_COMPROBANTES, ruta_storage: rutaStorageSubida });
           throw new Error('No se pudo guardar el gasto con tarjeta. No se registró ningún gasto operativo.');
         }
         if (usaronEstimados) setAdvertencia('Se usaron fechas estimadas de cierre/vencimiento. Podés confirmarlas luego desde Calendario.');

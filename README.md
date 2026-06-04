@@ -310,99 +310,83 @@ Las filas operativas con `grupo_id` nulo no cumplen ninguna política RLS y no s
 
 ## Storage de comprobantes
 
-Desde la Tarea 31, los comprobantes nuevos se guardan en el bucket de Supabase Storage **`comprobantes`** usando una ruta interna separada por grupo:
+Los comprobantes nuevos se guardan en el bucket de Supabase Storage **`comprobantes`** con una ruta interna separada por grupo:
 
 ```text
 {grupo_id}/{año}/{mes}/{gasto_id}/{timestamp}-{uuid}-{nombre_archivo_sanitizado}
 ```
 
-Vista como ruta completa del bucket:
+La ruta que se guarda en la tabla es la ruta interna del bucket, sin prefijar nuevamente el nombre del bucket. Por ejemplo, si el bucket es `comprobantes`, `ruta_storage` debe verse así:
 
 ```text
-comprobantes/{grupo_id}/{año}/{mes}/{gasto_id}/{archivo}
+7b8f0000-0000-0000-0000-000000000000/2026/06/gasto-uuid/1780000000000-uuid-factura.pdf
 ```
 
-Ejemplo:
+No debe guardarse como `comprobantes/{grupo_id}/...` porque `comprobantes` ya es el nombre del bucket.
 
-```text
-comprobantes/7b8f0000-0000-0000-0000-000000000000/2026/06/gasto-uuid/1780000000000-uuid-factura.pdf
-```
+### Tabla `comprobantes`
 
-### Metadata guardada
+La app usa como estructura estándar las columnas reales en español de `public.comprobantes`:
 
-La tabla `comprobantes` guarda la metadata del archivo asociado al gasto, incluyendo:
+- `grupo_id`: grupo del perfil activo del usuario.
+- `gasto_id`: gasto asociado.
+- `nombre_archivo`: nombre sanitizado/final del archivo guardado.
+- `tipo_comprobante`: clasificación funcional (`imagen`, `pdf` u `otro`).
+- `ruta_storage`: path interno exacto dentro del bucket `comprobantes`.
+- `url_storage`: URL pública solo si el bucket se configura público; con bucket privado puede quedar `NULL`.
+- `url_drive`: fallback futuro/histórico si un comprobante está archivado externamente.
+- `tamano_bytes`: tamaño informado por el navegador (`file.size`).
 
-- `grupo_id`: tomado del perfil activo del usuario.
-- `gasto_id`: gasto al que pertenece el archivo.
-- `nombre_archivo`: nombre original visible para el usuario.
-- `tipo_archivo` y `mime_type`: MIME del archivo (`image/jpeg`, `image/png`, `image/webp` o `application/pdf`).
-- `storage_path`: ruta interna exacta dentro del bucket `comprobantes` (sin prefijar nuevamente el nombre del bucket).
-- `ruta_storage`: columna histórica que puede existir en ambientes anteriores para compatibilidad de lectura.
-- `tamaño_bytes`: tamaño del archivo cuando el navegador lo informa.
-- `creado_en`: timestamp generado por la base.
+El código ya no escribe metadata en columnas duplicadas o no estándar como `storage_path`, `mime_type`, `tipo_archivo` o `tamaño_bytes`. Si alguna de esas columnas existe por migraciones anteriores, puede quedar en la base por compatibilidad, pero la app usa la estructura estándar en español.
 
+### Corrección de metadata en Supabase
 
-### Corrección urgente de metadata de comprobantes
-
-Después de esta corrección, ejecutar en Supabase SQL Editor la migración:
+Para alinear ambientes que hayan recibido migraciones anteriores, ejecutar en Supabase SQL Editor:
 
 ```sql
-supabase/migrations/010_fix_comprobantes_storage_metadata.sql
+supabase/migrations/011_comprobantes_metadata_espanol.sql
 ```
 
-Esta migración no borra datos. Agrega columnas faltantes en `public.comprobantes`, backfillea metadata posible desde columnas históricas y asegura políticas RLS por `grupo_id` para `SELECT`, `INSERT` y `UPDATE`.
-
-Verificar en Supabase Table Editor que `comprobantes` tenga estas columnas:
-
-- `grupo_id`
-- `storage_path`
-- `mime_type`
-- `nombre_archivo`
-- `tipo_archivo`
-- `tamaño_bytes`
-
-Para comprobantes nuevos, el `storage_path` guardado debe verse así:
-
-```text
-{grupo_id}/{año}/{mes}/{gasto_id}/{archivo}
-```
-
-No debe guardarse como `comprobantes/comprobantes/...` ni incluir dos veces el nombre del bucket.
+La migración no borra datos ni archivos. Asegura las columnas estándar en español, hace backfill no destructivo desde columnas históricas si existen, relaja `tipo_archivo` si quedó obligatorio en algún ambiente y mantiene RLS por `grupo_id`.
 
 ### Bucket privado y signed URLs
 
-El bucket **debe ser privado**. La app ya no guarda URLs públicas permanentes para comprobantes nuevos. Para previsualizar o descargar un comprobante, el cliente genera una **signed URL temporal** contra la ruta guardada en la metadata y solo después de consultar `comprobantes` filtrando por `grupo_id`.
+La estrategia actual es tratar el bucket **`comprobantes`** como privado. Para comprobantes nuevos, `url_storage` queda `NULL` y la app genera una **signed URL temporal** al abrir/descargar usando `ruta_storage`.
 
-Los comprobantes históricos no se migran en esta tarea. Si un comprobante viejo tiene `grupo_id` en metadata pero usa una ruta anterior, la app intenta mantener compatibilidad; en desarrollo muestra una advertencia en consola si la ruta no incluye el `grupo_id` esperado.
+Si un ambiente decide hacer público el bucket, `url_storage` puede guardar una URL pública. La pantalla de historial no depende de esa URL: primero intenta usar `ruta_storage` y, si no existe o no se puede firmar, usa `url_storage` o `url_drive` como fallback.
+
+### Compatibilidad con comprobantes antiguos
+
+Pueden existir comprobantes anteriores con rutas viejas tipo:
+
+```text
+2026/...
+```
+
+y comprobantes nuevos con rutas por grupo:
+
+```text
+{grupo_id}/2026/...
+```
+
+No se migran ni se borran rutas antiguas en esta tarea. La lectura soporta ambos casos:
+
+1. Si `ruta_storage` existe, la app intenta abrir/descargar desde Storage con ese path.
+2. Si `ruta_storage` está `NULL` pero `url_storage` o `url_drive` existe, usa esa URL como fallback.
+3. Si no hay ruta ni URL disponible, muestra **“Comprobante no disponible”** sin romper el historial de gastos.
 
 ### Políticas de Storage
 
-Ejecutar la migración:
-
-```sql
-supabase/migrations/009_storage_comprobantes_por_grupo.sql
-```
-
-La migración:
-
-1. Asegura columnas de metadata compatibles iniciales (`grupo_id`, `mime_type`, `storage_path`, `tamano_bytes`). La corrección posterior `010_fix_comprobantes_storage_metadata.sql` agrega además `tamaño_bytes`.
-2. Crea o actualiza el bucket `comprobantes` como privado (`public = false`).
-3. Crea políticas sobre `storage.objects` para `SELECT`, `INSERT`, `UPDATE` y `DELETE` limitadas al grupo del usuario.
-
-Para el bucket `comprobantes`, Supabase guarda el objeto con `storage.objects.name` sin el nombre del bucket. Por eso la política valida que el primer segmento de `name` coincida con el grupo del perfil:
+La migración `supabase/migrations/009_storage_comprobantes_por_grupo.sql` configura el bucket `comprobantes` y políticas de Storage para objetos nuevos bajo `{grupo_id}/...`. Para el bucket `comprobantes`, Supabase guarda `storage.objects.name` sin el nombre del bucket; por eso la política valida que el primer segmento de `name` coincida con el grupo del perfil:
 
 ```sql
 p.grupo_id::text = (storage.foldername(name))[1]
 ```
 
-### Cómo probar con dos usuarios
+### Cómo probar con imagen, PDF y dos usuarios
 
-1. Iniciar sesión con **Usuario 1** y crear/subir un comprobante a un gasto.
-2. Verificar en Storage que el archivo quedó en `comprobantes/{grupo_id_usuario_1}/AAAA/MM/{gasto_id}/...`.
-3. Verificar en la tabla `comprobantes` que `grupo_id` coincide con el grupo del Usuario 1 y que `storage_path` empieza con ese `grupo_id`.
-4. Abrir historial de gastos y confirmar que el Usuario 1 ve el badge **“Con comprobante · PDF”** o **“Con comprobante · Imagen”** y puede abrir la preview/descarga.
-5. Cerrar sesión e iniciar con **Usuario 2**.
-6. Confirmar que Usuario 2 no ve el comprobante del Usuario 1 en `/gastos`.
-7. Intentar abrir con Usuario 2 una ruta/signed URL generada por Usuario 1 después de vencida o generar acceso directo desde metadata ajena: debe fallar por RLS/políticas de Storage.
-8. Subir un comprobante propio con Usuario 2 y confirmar que queda bajo `comprobantes/{grupo_id_usuario_2}/...`.
-9. Volver con Usuario 1 y confirmar que no ve el comprobante del Usuario 2.
+1. Iniciar sesión con **Usuario 1** y crear un gasto con una imagen. Verificar que el archivo quede bajo `comprobantes/{grupo_id_usuario_1}/AAAA/MM/{gasto_id}/...` y que la fila de `comprobantes` tenga `grupo_id`, `nombre_archivo`, `tipo_comprobante = imagen`, `ruta_storage` y `tamano_bytes`.
+2. Crear otro gasto con un PDF. Verificar `tipo_comprobante = pdf`, `ruta_storage` y `tamano_bytes`.
+3. Abrir **Historial de gastos** y confirmar que carga aunque existan comprobantes viejos con metadata incompleta. Los comprobantes con ruta deben abrir/descargar; los que no tengan ruta ni URL deben mostrar **“Comprobante no disponible”**.
+4. Cerrar sesión e iniciar con **Usuario 2**. Confirmar que no ve comprobantes del Usuario 1 por las consultas filtradas por `grupo_id` y RLS.
+5. Revisar Storage: los comprobantes nuevos deben quedar bajo carpeta `{grupo_id}/...`; las carpetas antiguas `2026/...` pueden seguir existiendo y no se borran.

@@ -12,13 +12,25 @@ type CrearRutaStorageParams = {
 };
 
 export function validarComprobante(archivo: File) {
-  if (!TIPOS_PERMITIDOS.includes(archivo.type)) {
+  const tipoComprobante = detectarTipoComprobante(archivo);
+  const tipoPermitido = TIPOS_PERMITIDOS.includes(archivo.type) || tipoComprobante === 'pdf';
+  if (!tipoPermitido) {
     return { valido: false, mensaje: 'El comprobante debe ser imagen o PDF.' };
   }
   if (archivo.size > TAMANO_MAXIMO_COMPROBANTE_BYTES) {
     return { valido: false, mensaje: 'El archivo supera el tamaño máximo permitido.' };
   }
   return { valido: true, mensaje: null };
+}
+
+export type TipoComprobante = 'imagen' | 'pdf' | 'otro';
+
+export function detectarTipoComprobante(archivo: Pick<File, 'type' | 'name'>): TipoComprobante {
+  const tipo = archivo.type.toLowerCase();
+  const nombre = archivo.name.toLowerCase();
+  if (tipo.startsWith('image/')) return 'imagen';
+  if (tipo === 'application/pdf' || nombre.endsWith('.pdf')) return 'pdf';
+  return 'otro';
 }
 
 export function normalizarNombreArchivo(nombreArchivo: string) {
@@ -51,4 +63,8 @@ export function crearRutaStorageComprobante({ grupoId, gastoId, nombreArchivo, f
 export function pathComprobantePerteneceAGrupo(rutaStorage: string | null | undefined, grupoId: string | null | undefined) {
   if (!rutaStorage || !grupoId) return false;
   return rutaStorage.split('/')[0] === grupoId;
+}
+
+export function obtenerNombreArchivoDesdeRuta(rutaStorage: string) {
+  return rutaStorage.split('/').pop() ?? normalizarNombreArchivo(rutaStorage);
 }
