@@ -267,6 +267,22 @@ Si los conteos dan `0`, el backfill quedó aplicado para esas tablas.
 
 Desde la Tarea 30, SpendWise protege las tablas operativas con **Row Level Security (RLS)** en Supabase usando `grupo_id`.
 
+### Activar RLS en Supabase
+
+1. Abrir el archivo `supabase/migrations/008_enable_rls_operational_tables.sql`.
+2. Copiar todo el contenido del archivo.
+3. Ir a **Supabase → SQL Editor → New query**.
+4. Pegar el SQL completo.
+5. Presionar **Run**.
+6. Verificar en **Table Editor** que las tablas operativas ya no aparezcan como **UNRESTRICTED**.
+
+### Pruebas esperadas después de ejecutar la migración
+
+1. Usuario 1 sigue viendo sus datos.
+2. Usuario 2 no ve datos del Usuario 1.
+3. Usuario 2 puede crear sus propios datos.
+4. Usuario 1 no ve datos del Usuario 2.
+
 ### Cómo funciona
 
 - El frontend mantiene los filtros explícitos por grupo activo, por ejemplo `.eq('grupo_id', perfil.grupo_id)`, para que las pantallas sigan mostrando solo el contexto actual.
