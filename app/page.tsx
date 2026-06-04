@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
-import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
+import { useAuthSpendWise } from '@/components/auth-context';
 import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
 import { registrarErrorSpendWise, type ErrorTecnico } from '@/lib/errores';
 
@@ -94,9 +94,9 @@ function formatearPeriodoLargo(periodo: string) {
 
 export default function DashboardPage() {
   const [mesSeleccionado, setMesSeleccionado] = useState(obtenerPeriodoActual());
-  const [perfilCargando, setPerfilCargando] = useState(true);
-  const [grupoId, setGrupoId] = useState<string | null>(null);
-  const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
+  const { perfil } = useAuthSpendWise();
+  const grupoId = perfil?.grupo_id ?? null;
+  const usuarioEmail = perfil?.email ?? null;
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorTecnico, setErrorTecnico] = useState<ErrorTecnico | null>(null);
@@ -112,48 +112,23 @@ export default function DashboardPage() {
   const [tarjetasFisicas, setTarjetasFisicas] = useState<Map<string, string>>(new Map());
   const [detalleCuotasAbierto, setDetalleCuotasAbierto] = useState(false);
 
-  useEffect(() => {
-    let cancelado = false;
+  const ultimaCargaDashboard = useRef<string | null>(null);
 
-    async function cargarPerfil() {
-      setPerfilCargando(true);
-      setError(null);
-      setErrorTecnico(null);
-
-      try {
-        const perfil = await obtenerPerfilActivo();
-        if (cancelado) return;
-        setGrupoId(perfil.grupo_id);
-        setUsuarioEmail(perfil.email);
-      } catch (errorPerfil) {
-        if (cancelado) return;
-        const detalle = registrarErrorSpendWise('dashboard', errorPerfil);
-        setGrupoId(null);
-        setErrorTecnico(detalle);
-        setError('No se pudo cargar el grupo activo.');
-      } finally {
-        if (!cancelado) setPerfilCargando(false);
-      }
-    }
-
-    void cargarPerfil();
-
-    return () => {
-      cancelado = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (perfilCargando) return;
-
-    if (!grupoId) {
-      setCargando(false);
-      setError('No se pudo cargar el grupo activo.');
-      return;
-    }
-
+  function reintentarDashboard() {
+    if (!grupoId) return;
+    ultimaCargaDashboard.current = null;
     void cargarDashboard(mesSeleccionado, grupoId);
-  }, [perfilCargando, grupoId, mesSeleccionado]);
+  }
+
+  useEffect(() => {
+    if (!grupoId) return;
+
+    const claveCarga = `${grupoId}:${mesSeleccionado}`;
+    if (ultimaCargaDashboard.current === claveCarga) return;
+
+    ultimaCargaDashboard.current = claveCarga;
+    void cargarDashboard(mesSeleccionado, grupoId);
+  }, [grupoId, mesSeleccionado]);
 
   async function cargarDashboard(periodo: string, grupoIdActivo: string) {
     setCargando(true);
@@ -164,7 +139,7 @@ export default function DashboardPage() {
     const proximoPeriodo = obtenerSiguientePeriodo(periodo);
 
     try {
-    if (process.env.NODE_ENV !== 'production') console.debug('[debug] /dashboard', { pantalla: '/dashboard', email: usuarioEmail, grupo_id: grupoIdActivo });
+    if (process.env.NODE_ENV !== 'production') console.debug('[debug] dashboard empieza carga', { pantalla: '/dashboard', email: usuarioEmail, grupo_id: grupoIdActivo, periodo });
 
     const [
       gastosRes,
@@ -237,6 +212,7 @@ export default function DashboardPage() {
     setPersonas(new Map(((personasRes.data ?? []) as Persona[]).map((p) => [p.id, `${p.nombre} ${p.apellido ?? ''}`.trim()])));
     setCuentasTarjeta(new Map(((cuentasRes.data ?? []) as CuentaTarjeta[]).map((c) => [c.id, c.nombre_cuenta])));
     setTarjetasFisicas(new Map(((tarjetasRes.data ?? []) as TarjetaFisica[]).map((t) => [t.id, `${t.alias ?? 'Tarjeta sin alias'}${t.ultimos_4_digitos ? ` · ${t.ultimos_4_digitos}` : ''}`])));
+    if (process.env.NODE_ENV !== 'production') console.debug('[debug] dashboard termina carga', { pantalla: '/dashboard', grupo_id: grupoIdActivo, periodo, gastos: (gastosRes.data ?? []).length, cuotas: (cuotasMesRes.data ?? []).length });
     } catch (errorCarga) {
       const detalle = registrarErrorSpendWise('dashboard', errorCarga);
       setErrorTecnico(detalle);
@@ -344,8 +320,23 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {perfilCargando ? <p className="text-sm text-slate-500">Cargando grupo...</p> : null}
-      {error ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</p> : null}
+      {!grupoId ? <p className="text-sm text-slate-500">Esperando grupo activo...</p> : null}
+      {error ? (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          <p>{error}</p>
+          {grupoId ? (
+            <button
+              type="button"
+              onClick={reintentarDashboard}
+              disabled={cargando}
+              className="mt-2 rounded-lg border border-rose-300 bg-white px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {cargando ? 'Reintentando...' : 'Reintentar dashboard'}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {cargando ? <SkeletonDashboard /> : null}
       <ErrorTecnicoDesarrollo error={errorTecnico} />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -417,8 +408,21 @@ export default function DashboardPage() {
         <CardListado titulo="Cuentas de tarjeta comprometidas" filas={cuentasComprometidas} vacio="No hay pagos de tarjeta proyectados para este mes." />
       </div>
 
-      {cargando ? <p className="text-sm text-slate-500">Cargando dashboard...</p> : null}
     </section>
+  );
+}
+
+function SkeletonDashboard() {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {['Gastos del mes', 'Tarjetas a reservar', 'Próximo mes', 'Movimientos'].map((titulo) => (
+        <article key={titulo} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="h-3 w-28 animate-pulse rounded-full bg-slate-200" />
+          <div className="mt-3 h-7 w-36 animate-pulse rounded-full bg-slate-200" />
+          <div className="mt-3 h-3 w-24 animate-pulse rounded-full bg-slate-100" />
+        </article>
+      ))}
+    </div>
   );
 }
 

@@ -8,6 +8,7 @@ type Perfil = {
 };
 
 let creacionPerfilEnCurso: Promise<Perfil> | null = null;
+let usuarioCreacionPerfilEnCurso: string | null = null;
 
 const ERROR_PERFIL = 'No se pudo cargar tu perfil o grupo. Intentá nuevamente.';
 
@@ -44,78 +45,90 @@ export async function ensureUserProfile(user: User): Promise<Perfil> {
     throw new Error('La sesión no tiene id/email válidos para crear el perfil.');
   }
 
-  if (creacionPerfilEnCurso) return creacionPerfilEnCurso;
+  if (creacionPerfilEnCurso && usuarioCreacionPerfilEnCurso === user.id) return creacionPerfilEnCurso;
 
+  usuarioCreacionPerfilEnCurso = user.id;
   creacionPerfilEnCurso = (async () => {
-  const { data: perfilActual, error: errorPerfilActual } = await supabase
-    .from('perfiles')
-    .select('id,grupo_id,email')
-    .eq('id', user.id)
-    .maybeSingle();
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug('[debug] ensureUserProfile: inicio carga perfil', { userId: user.id, email: user.email });
+    }
 
-  if (errorPerfilActual) {
-    console.error('Error cargando perfil actual', {
-      code: errorPerfilActual.code,
-      message: errorPerfilActual.message,
-      details: errorPerfilActual.details,
-    });
-    throw new Error(ERROR_PERFIL);
-  }
-
-  if (perfilActual?.grupo_id) {
-    return perfilActual;
-  }
-
-  const grupoId = await crearGrupoPorDefecto(user.email);
-
-  if (!perfilActual) {
-    const { data: perfilCreado, error: errorPerfilCreado } = await supabase
+    const { data: perfilActual, error: errorPerfilActual } = await supabase
       .from('perfiles')
-      .insert({
-        id: user.id,
-        grupo_id: grupoId,
-        email: user.email ?? null,
-        nombre: nombrePerfilPorDefecto(user),
-        rol: 'admin',
-      })
       .select('id,grupo_id,email')
-      .single();
+      .eq('id', user.id)
+      .maybeSingle();
 
-    if (errorPerfilCreado || !perfilCreado) {
-      console.error('Error creando perfil', {
-        code: errorPerfilCreado?.code,
-        message: errorPerfilCreado?.message,
-        details: errorPerfilCreado?.details,
+    if (errorPerfilActual) {
+      console.error('Error cargando perfil actual', {
+        code: errorPerfilActual.code,
+        message: errorPerfilActual.message,
+        details: errorPerfilActual.details,
       });
-      console.error('Grupo creado sin perfil asociado. Marcar para limpieza manual en mantenimiento.', { grupoId, userId: user.id, email: user.email });
       throw new Error(ERROR_PERFIL);
     }
 
-    return perfilCreado;
-  }
+    if (perfilActual?.grupo_id) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('[debug] ensureUserProfile: perfil encontrado', { userId: user.id, grupo_id: perfilActual.grupo_id });
+      }
+      return perfilActual;
+    }
 
-  const { data: perfilActualizado, error: errorPerfilActualizado } = await supabase
-    .from('perfiles')
-    .update({ grupo_id: grupoId, email: perfilActual.email ?? user.email ?? null })
-    .eq('id', user.id)
-    .select('id,grupo_id,email')
-    .single();
+    const grupoId = await crearGrupoPorDefecto(user.email);
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug('[debug] ensureUserProfile: grupo encontrado', { userId: user.id, grupo_id: grupoId });
+    }
 
-  if (errorPerfilActualizado || !perfilActualizado) {
-    console.error('Error actualizando perfil sin grupo', {
-      code: errorPerfilActualizado?.code,
-      message: errorPerfilActualizado?.message,
-      details: errorPerfilActualizado?.details,
-    });
-    throw new Error(ERROR_PERFIL);
-  }
+    if (!perfilActual) {
+      const { data: perfilCreado, error: errorPerfilCreado } = await supabase
+        .from('perfiles')
+        .insert({
+          id: user.id,
+          grupo_id: grupoId,
+          email: user.email ?? null,
+          nombre: nombrePerfilPorDefecto(user),
+          rol: 'admin',
+        })
+        .select('id,grupo_id,email')
+        .single();
 
-  return perfilActualizado;
+      if (errorPerfilCreado || !perfilCreado) {
+        console.error('Error creando perfil', {
+          code: errorPerfilCreado?.code,
+          message: errorPerfilCreado?.message,
+          details: errorPerfilCreado?.details,
+        });
+        console.error('Grupo creado sin perfil asociado. Marcar para limpieza manual en mantenimiento.', { grupoId, userId: user.id, email: user.email });
+        throw new Error(ERROR_PERFIL);
+      }
+
+      return perfilCreado;
+    }
+
+    const { data: perfilActualizado, error: errorPerfilActualizado } = await supabase
+      .from('perfiles')
+      .update({ grupo_id: grupoId, email: perfilActual.email ?? user.email ?? null })
+      .eq('id', user.id)
+      .select('id,grupo_id,email')
+      .single();
+
+    if (errorPerfilActualizado || !perfilActualizado) {
+      console.error('Error actualizando perfil sin grupo', {
+        code: errorPerfilActualizado?.code,
+        message: errorPerfilActualizado?.message,
+        details: errorPerfilActualizado?.details,
+      });
+      throw new Error(ERROR_PERFIL);
+    }
+
+    return perfilActualizado;
   })();
 
   try {
     return await creacionPerfilEnCurso;
   } finally {
     creacionPerfilEnCurso = null;
+    usuarioCreacionPerfilEnCurso = null;
   }
 }
