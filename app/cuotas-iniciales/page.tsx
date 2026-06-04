@@ -71,7 +71,7 @@ export default function Page() {
     return Array.from({ length: longitud }, (_, idx) => ({ numero: formulario.cuota_inicio_pendiente + idx, monto, periodo: periodosVistaPrevia[idx] ?? sumarMesesPeriodo(formulario.periodo_inicio_pago, idx) }));
   }, [formulario, periodosVistaPrevia]);
 
-  useEffect(() => { (async () => { const perfil = await obtenerPerfilActivo(); setGrupoId(perfil.grupo_id); const { data: authData } = await supabase.auth.getUser(); setUsuarioEmail(authData.user?.email ?? null); })(); }, []);
+  useEffect(() => { (async () => { try { const perfil = await obtenerPerfilActivo(); setGrupoId(perfil.grupo_id); setUsuarioEmail(perfil.email); if (process.env.NODE_ENV !== 'production') console.debug('[SpendWise][cuotas-iniciales] grupo_id usado', perfil.grupo_id, { email: perfil.email }); } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo cargar el grupo activo.'); } })(); }, []);
   useEffect(() => { if (!grupoId) return; void cargarDatos(); }, [grupoId]);
   useEffect(() => {
     const longitud = formulario.total_cuotas - formulario.cuota_inicio_pendiente + 1;
@@ -82,11 +82,11 @@ export default function Page() {
   async function cargarDatos() {
     if (!grupoId) return;
     const [ct, tf, p, c, ci] = await Promise.all([
-      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,banco,marca,dia_cierre_habitual,dias_hasta_vencimiento').eq('activo', true).order('nombre_cuenta'),
-      supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,alias,tipo,ultimos_4_digitos').eq('activo', true),
+      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,banco,marca,dia_cierre_habitual,dias_hasta_vencimiento').eq('grupo_id', grupoId).eq('activo', true).order('nombre_cuenta'),
+      supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,alias,tipo,ultimos_4_digitos').eq('grupo_id', grupoId).eq('activo', true),
       supabase.from('personas').select('id,nombre,apellido').eq('activo', true).eq('grupo_id', grupoId).order('nombre'),
       supabase.from('categorias').select('id,nombre').eq('activo', true).eq('grupo_id', grupoId).order('nombre'),
-      supabase.from('compras_cuotas_iniciales').select('id,fecha_compra_original,establecimiento,descripcion_compra,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,categoria_id,observaciones,cuota_inicio_pendiente,total_cuotas,monto_cuota,moneda,periodo_inicio_pago,estado').order('creado_en', { ascending: false }),
+      supabase.from('compras_cuotas_iniciales').select('id,fecha_compra_original,establecimiento,descripcion_compra,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,categoria_id,observaciones,cuota_inicio_pendiente,total_cuotas,monto_cuota,moneda,periodo_inicio_pago,estado').eq('grupo_id', grupoId).order('creado_en', { ascending: false }),
     ]);
     if (ct.error || tf.error || p.error || c.error || ci.error) return setError('No se pudieron cargar los datos de cuotas iniciales.');
     setCuentas((ct.data ?? []) as CuentaTarjeta[]);
@@ -94,11 +94,13 @@ export default function Page() {
     setPersonas((p.data ?? []) as Persona[]);
     setCategorias((c.data ?? []) as Categoria[]);
     setCompras((ci.data ?? []) as CompraInicial[]);
+    if (process.env.NODE_ENV !== 'production') console.debug('[SpendWise][cuotas-iniciales] registros cargados', { email: usuarioEmail, grupo_id: grupoId, compras: ci.data?.length ?? 0 });
   }
 
   async function guardar(event: FormEvent) {
     event.preventDefault();
     setError(null); setMensaje(null);
+    if (!grupoId) return setError('Cargando grupo…');
     if (!formulario.establecimiento.trim()) return setError('El establecimiento es obligatorio.');
     if (!formulario.cuenta_tarjeta_id) return setError('La cuenta de tarjeta es obligatoria.');
     if (!formulario.persona_id) return setError('La persona es obligatoria.');
@@ -111,7 +113,7 @@ export default function Page() {
 
     setGuardando(true);
     try {
-      const { data: compra, error: errorCompra } = await supabase.from('compras_cuotas_iniciales').insert({ fecha_compra_original: formulario.fecha_compra_original || null, establecimiento: formulario.establecimiento.trim(), descripcion_compra: formulario.descripcion_compra.trim() || null, cuenta_tarjeta_id: formulario.cuenta_tarjeta_id, tarjeta_fisica_id: formulario.tarjeta_fisica_id || null, persona_id: formulario.persona_id, cuota_inicio_pendiente: formulario.cuota_inicio_pendiente, total_cuotas: formulario.total_cuotas, monto_cuota: monto, moneda: formulario.moneda, periodo_inicio_pago: formulario.periodo_inicio_pago, categoria_id: formulario.categoria_id || null, observaciones: formulario.observaciones.trim() || null, estado: 'activa' }).select('id').single();
+      const { data: compra, error: errorCompra } = await supabase.from('compras_cuotas_iniciales').insert({ grupo_id: grupoId, fecha_compra_original: formulario.fecha_compra_original || null, establecimiento: formulario.establecimiento.trim(), descripcion_compra: formulario.descripcion_compra.trim() || null, cuenta_tarjeta_id: formulario.cuenta_tarjeta_id, tarjeta_fisica_id: formulario.tarjeta_fisica_id || null, persona_id: formulario.persona_id, cuota_inicio_pendiente: formulario.cuota_inicio_pendiente, total_cuotas: formulario.total_cuotas, monto_cuota: monto, moneda: formulario.moneda, periodo_inicio_pago: formulario.periodo_inicio_pago, categoria_id: formulario.categoria_id || null, observaciones: formulario.observaciones.trim() || null, estado: 'activa' }).select('id').single();
       if (errorCompra || !compra) throw new Error('No se pudo guardar la compra de cuotas iniciales.');
 
       const cuotas = vistaPrevia.map((fila) => ({ compra_cuota_inicial_id: compra.id, gasto_id: null, cuenta_tarjeta_id: formulario.cuenta_tarjeta_id, tarjeta_fisica_id: formulario.tarjeta_fisica_id || null, persona_id: formulario.persona_id, establecimiento: formulario.establecimiento.trim(), descripcion_cuota: formulario.descripcion_compra.trim() || formulario.establecimiento.trim(), numero_cuota: fila.numero, total_cuotas: formulario.total_cuotas, monto_cuota: monto, moneda: formulario.moneda, periodo_pago_estimado: fila.periodo, estado: 'pendiente', origen_cuota: 'carga_inicial', observaciones: formulario.observaciones.trim() || null }));
@@ -125,7 +127,8 @@ export default function Page() {
   }
 
   async function obtenerCuotasCompra(compraId: string) {
-    const { data, error: err } = await supabase.from('cuotas_tarjeta').select('id,compra_cuota_inicial_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,moneda,estado,origen_cuota,observaciones,tarjeta_fisica_id,persona_id').eq('compra_cuota_inicial_id', compraId).order('numero_cuota');
+    if (!grupoId) throw new Error('Cargando grupo…');
+    const { data, error: err } = await supabase.from('cuotas_tarjeta').select('id,compra_cuota_inicial_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,moneda,estado,origen_cuota,observaciones,tarjeta_fisica_id,persona_id').eq('compra_cuota_inicial_id', compraId).eq('grupo_id', grupoId).order('numero_cuota');
     if (err) throw new Error('No se pudieron consultar las cuotas generadas.');
     return (data ?? []) as CuotaGenerada[];
   }
@@ -161,6 +164,7 @@ export default function Page() {
   }
 
   async function guardarEdicion(compra: CompraInicial) {
+    if (!grupoId) return setError('Cargando grupo…');
     if (!compraEditandoId) return;
     setError(null);
     setMensaje(null);
@@ -173,7 +177,7 @@ export default function Page() {
       tarjeta_fisica_id: edicionCompra.tarjeta_fisica_id || null,
       persona_id: edicionCompra.persona_id || null,
     };
-    const { error: errCompra } = await supabase.from('compras_cuotas_iniciales').update(payload).eq('id', compraEditandoId);
+    const { error: errCompra } = await supabase.from('compras_cuotas_iniciales').update(payload).eq('id', compraEditandoId).eq('grupo_id', grupoId);
     if (errCompra) return setError('No se pudo guardar la edición de la carga inicial.');
 
     const cuotas = cuotasPorCompra[compraEditandoId] ?? [];
@@ -200,13 +204,13 @@ export default function Page() {
             estado: cuota.estado === 'pendiente' ? 'reprogramada' : cuota.estado,
             observaciones: observacionesActualizadas || null,
             actualizado_en: new Date().toISOString(),
-          }).eq('id', cuota.id);
+          }).eq('id', cuota.id).eq('grupo_id', grupoId);
           if (error) return setError('No se pudo actualizar el período de una cuota pendiente.');
         }
       }
       const cambioPersonaOTarjeta = (edicionCompra.persona_id && edicionCompra.persona_id !== cuota.persona_id) || (edicionCompra.tarjeta_fisica_id !== undefined && (edicionCompra.tarjeta_fisica_id || null) !== cuota.tarjeta_fisica_id);
       if (cambioPersonaOTarjeta && !ESTADOS_NO_PROPAGAR.has(cuota.estado)) {
-        const { error } = await supabase.from('cuotas_tarjeta').update({ persona_id: edicionCompra.persona_id, tarjeta_fisica_id: edicionCompra.tarjeta_fisica_id || null }).eq('id', cuota.id);
+        const { error } = await supabase.from('cuotas_tarjeta').update({ persona_id: edicionCompra.persona_id, tarjeta_fisica_id: edicionCompra.tarjeta_fisica_id || null }).eq('id', cuota.id).eq('grupo_id', grupoId);
         if (error) return setError('No se pudo propagar persona/tarjeta en cuotas pendientes.');
       }
     }
@@ -216,6 +220,7 @@ export default function Page() {
       .from('compras_cuotas_iniciales')
       .select('id,fecha_compra_original,establecimiento,descripcion_compra,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,categoria_id,observaciones,cuota_inicio_pendiente,total_cuotas,monto_cuota,moneda,periodo_inicio_pago,estado')
       .eq('id', compra.id)
+      .eq('grupo_id', grupoId)
       .single();
     if (errorCompraActualizada || !compraActualizada) return setError('Se guardó la edición, pero no se pudo refrescar la carga inicial.');
     const cuotasActualizadas = await obtenerCuotasCompra(compra.id);
@@ -229,11 +234,13 @@ export default function Page() {
   }
 
   async function resolverCalendarioParaPeriodo(cuentaTarjetaId: string, periodoResumen: string): Promise<{ fecha_vencimiento: string } | null> {
+    if (!grupoId) throw new Error('Cargando grupo…');
     const { data: calendarioExistente, error: errorConsulta } = await supabase
       .from('calendario_tarjetas')
       .select('id,fecha_vencimiento')
       .eq('cuenta_tarjeta_id', cuentaTarjetaId)
       .eq('periodo_resumen', periodoResumen)
+      .eq('grupo_id', grupoId)
       .maybeSingle();
     if (errorConsulta) throw new Error('No se pudo validar el calendario de la cuenta.');
     if (calendarioExistente?.fecha_vencimiento) return { fecha_vencimiento: calendarioExistente.fecha_vencimiento };
@@ -246,6 +253,7 @@ export default function Page() {
     const { data: calendarioCreado, error: errorCreacion } = await supabase
       .from('calendario_tarjetas')
       .insert({
+        grupo_id: grupoId,
         cuenta_tarjeta_id: cuentaTarjetaId,
         periodo_resumen: periodoResumen,
         fecha_cierre: fechaCierre,
@@ -261,9 +269,10 @@ export default function Page() {
   }
 
   async function anular(compraId: string) {
-    const { error: errCompra } = await supabase.from('compras_cuotas_iniciales').update({ estado: 'anulada' }).eq('id', compraId);
+    if (!grupoId) return setError('Cargando grupo…');
+    const { error: errCompra } = await supabase.from('compras_cuotas_iniciales').update({ estado: 'anulada' }).eq('id', compraId).eq('grupo_id', grupoId);
     if (errCompra) return setError('No se pudo anular la carga inicial.');
-    const { error: errCuotas } = await supabase.from('cuotas_tarjeta').update({ estado: 'cancelada' }).eq('compra_cuota_inicial_id', compraId).neq('estado', 'pagada');
+    const { error: errCuotas } = await supabase.from('cuotas_tarjeta').update({ estado: 'cancelada' }).eq('compra_cuota_inicial_id', compraId).eq('grupo_id', grupoId).neq('estado', 'pagada');
     if (errCuotas) return setError('No se pudieron cancelar las cuotas pendientes asociadas.');
     setMensaje('Carga inicial anulada correctamente.');
     await cargarDatos();

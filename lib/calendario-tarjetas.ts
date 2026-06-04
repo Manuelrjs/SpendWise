@@ -6,6 +6,7 @@ export type OrigenFecha = 'manual' | 'calculado' | 'importado' | 'resumen_banco'
 
 export type CalendarioTarjetaDB = {
   id: string;
+  grupo_id?: string | null;
   cuenta_tarjeta_id: string;
   periodo_resumen: string;
   fecha_cierre: string;
@@ -18,6 +19,7 @@ export type CalendarioTarjetaDB = {
 
 type CuentaCalendario = {
   id: string;
+  grupo_id?: string | null;
   nombre_cuenta?: string | null;
   dia_cierre_habitual: number | null;
   dias_hasta_vencimiento: number | null;
@@ -50,6 +52,7 @@ function observacionPorContexto(contexto: ContextoCalendario) {
 export async function consolidarDuplicadosCalendario(
   supabase: SupabaseClient,
   duplicados: CalendarioTarjetaDB[],
+  grupoId?: string | null,
 ): Promise<{ principal: CalendarioTarjetaDB; eliminados: number; pendiente: boolean }> {
   const principal = elegirPrincipal(duplicados);
   const secundarios = duplicados.filter((item) => item.id !== principal.id);
@@ -59,10 +62,12 @@ export async function consolidarDuplicadosCalendario(
   if (!obsPrincipal) {
     const obsSecundaria = secundarios.find((item) => (item.observaciones?.trim()?.length ?? 0) > 0)?.observaciones?.trim();
     if (obsSecundaria) {
-      const { data, error } = await supabase
+      let actualizar = supabase
         .from('calendario_tarjetas')
         .update({ observaciones: obsSecundaria, actualizado_en: new Date().toISOString() })
-        .eq('id', principal.id)
+        .eq('id', principal.id);
+      if (grupoId ?? principal.grupo_id) actualizar = actualizar.eq('grupo_id', grupoId ?? principal.grupo_id);
+      const { data, error } = await actualizar
         .select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones,creado_en')
         .single();
       if (!error && data) principalActualizado = data as CalendarioTarjetaDB;
@@ -72,7 +77,9 @@ export async function consolidarDuplicadosCalendario(
   let eliminados = 0;
   let pendiente = false;
   for (const secundario of secundarios) {
-    const { error } = await supabase.from('calendario_tarjetas').delete().eq('id', secundario.id);
+    let borrar = supabase.from('calendario_tarjetas').delete().eq('id', secundario.id);
+    if (grupoId ?? secundario.grupo_id) borrar = borrar.eq('grupo_id', grupoId ?? secundario.grupo_id);
+    const { error } = await borrar;
     if (error) {
       console.warn('No se pudo eliminar calendario duplicado de forma automática', {
         calendario_id: secundario.id,
@@ -93,21 +100,24 @@ export async function obtenerOCrearCalendarioEstimado(params: {
   cuenta: CuentaCalendario;
   periodo: string;
   contexto?: ContextoCalendario;
+  grupoId?: string | null;
 }) {
   const { supabase, cuenta, periodo, contexto = 'gasto' } = params;
+  const grupoId = params.grupoId ?? cuenta.grupo_id ?? null;
 
-  const { data: existentes, error } = await supabase
+  let consulta = supabase
     .from('calendario_tarjetas')
     .select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones,creado_en')
     .eq('cuenta_tarjeta_id', cuenta.id)
-    .eq('periodo_resumen', periodo)
-    .order('creado_en', { ascending: true });
+    .eq('periodo_resumen', periodo);
+  if (grupoId) consulta = consulta.eq('grupo_id', grupoId);
+  const { data: existentes, error } = await consulta.order('creado_en', { ascending: true });
 
   if (error) throw new Error('No se pudo consultar calendario de tarjetas.');
 
   const encontrados = (existentes ?? []) as CalendarioTarjetaDB[];
   if (encontrados.length > 1) {
-    const consolidacion = await consolidarDuplicadosCalendario(supabase, encontrados);
+    const consolidacion = await consolidarDuplicadosCalendario(supabase, encontrados, grupoId);
     return { calendario: consolidacion.principal, generado: false, consolidados: consolidacion.eliminados, pendientes: consolidacion.pendiente ? 1 : 0 };
   }
 
@@ -121,6 +131,7 @@ export async function obtenerOCrearCalendarioEstimado(params: {
   const fecha_cierre = construirFechaCierreEstimada(periodo, cuenta.dia_cierre_habitual);
   const fecha_vencimiento = construirFechaVencimientoEstimada(fecha_cierre, cuenta.dias_hasta_vencimiento);
   const payload = {
+    ...(grupoId ? { grupo_id: grupoId } : {}),
     cuenta_tarjeta_id: cuenta.id,
     periodo_resumen: periodo,
     fecha_cierre,

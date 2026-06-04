@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
 import { consolidarDuplicadosCalendario, obtenerOCrearCalendarioEstimado, type CalendarioTarjetaDB } from '@/lib/calendario-tarjetas';
@@ -40,6 +40,8 @@ const periodoDesdeFecha = (fecha: string) => fecha.slice(0, 7);
 
 export default function MantenimientoPage() {
   const esDesarrollo = process.env.NODE_ENV !== 'production';
+  const [grupoId, setGrupoId] = useState<string | null>(null);
+  const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
   const [mensaje, setMensaje] = useState('');
   const [cardSeleccionada, setCardSeleccionada] = useState<DiagnosticoKey | null>(null);
@@ -56,6 +58,19 @@ export default function MantenimientoPage() {
   });
   const [erroresDiagnostico, setErroresDiagnostico] = useState<Partial<Record<DiagnosticoKey, string>>>({});
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const perfil = await obtenerPerfilActivo();
+        setGrupoId(perfil.grupo_id);
+        setUsuarioEmail(perfil.email);
+        if (process.env.NODE_ENV !== 'production') console.debug('[SpendWise][mantenimiento] grupo_id usado', perfil.grupo_id, { email: perfil.email });
+      } catch (e) {
+        setMensaje(e instanceof Error ? e.message : 'No se pudo cargar el grupo activo.');
+      }
+    })();
+  }, []);
+
   const estimarPeriodoResumenYPago = (fecha: string, dia: number | null, dias: number | null) => {
     if (!dia || dias === null) return { periodo_resumen: periodoDesdeFecha(fecha), periodo_pago_estimado: periodoDesdeFecha(fecha), fecha_cierre: null, fecha_vencimiento: null };
     const calculo = calcularPeriodoResumenYVencimiento({ fecha_gasto: fecha, dia_cierre_habitual: dia, dias_hasta_vencimiento: dias });
@@ -63,6 +78,10 @@ export default function MantenimientoPage() {
   };
 
   async function diagnosticar() {
+    if (!grupoId) {
+      setMensaje('Cargando grupo…');
+      return;
+    }
     setCargando(true);
     setMensaje('');
     setErroresDiagnostico({});
@@ -70,15 +89,18 @@ export default function MantenimientoPage() {
     const [gastosRes, cuotasRes, calendariosRes, comprasInicialesRes] = await Promise.all([
       supabase
         .from('gastos')
-        .select('id,fecha_gasto,establecimiento,monto,moneda,estado_registro,observaciones,creado_en,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,persona:personas(nombre,apellido),categoria:categorias(nombre),cuenta:cuentas_tarjeta(id,nombre_cuenta,dia_cierre_habitual,dias_hasta_vencimiento),tarjeta:tarjetas_fisicas(alias,tipo,ultimos_4_digitos),medio_pago:medios_pago(tipo),comprobante:comprobantes(id)'),
+        .select('id,fecha_gasto,establecimiento,monto,moneda,estado_registro,observaciones,creado_en,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,persona:personas(nombre,apellido),categoria:categorias(nombre),cuenta:cuentas_tarjeta(id,nombre_cuenta,dia_cierre_habitual,dias_hasta_vencimiento),tarjeta:tarjetas_fisicas(alias,tipo,ultimos_4_digitos),medio_pago:medios_pago(tipo),comprobante:comprobantes(id)')
+        .eq('grupo_id', grupoId),
       supabase
         .from('cuotas_tarjeta')
-        .select('id,gasto_id,compra_cuota_inicial_id,cuenta_tarjeta_id,periodo_pago_estimado,estado,establecimiento,persona_id,monto_cuota,numero_cuota,total_cuotas,moneda,origen_cuota,fecha_estimada_pago,cuenta:cuentas_tarjeta(id,nombre_cuenta,dia_cierre_habitual,dias_hasta_vencimiento),gasto:gastos(id,fecha_gasto,establecimiento,estado_registro),persona:personas(nombre,apellido),compra_inicial:compras_cuotas_iniciales(id,estado)'),
+        .select('id,gasto_id,compra_cuota_inicial_id,cuenta_tarjeta_id,periodo_pago_estimado,estado,establecimiento,persona_id,monto_cuota,numero_cuota,total_cuotas,moneda,origen_cuota,fecha_estimada_pago,cuenta:cuentas_tarjeta(id,nombre_cuenta,dia_cierre_habitual,dias_hasta_vencimiento),gasto:gastos(id,fecha_gasto,establecimiento,estado_registro),persona:personas(nombre,apellido),compra_inicial:compras_cuotas_iniciales(id,estado)')
+        .eq('grupo_id', grupoId),
       supabase
         .from('calendario_tarjetas')
         .select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones,creado_en')
+        .eq('grupo_id', grupoId)
         .order('creado_en', { ascending: true }),
-      supabase.from('compras_cuotas_iniciales').select('id,estado,periodo_inicio_pago'),
+      supabase.from('compras_cuotas_iniciales').select('id,estado,periodo_inicio_pago').eq('grupo_id', grupoId),
     ]);
 
     const erroresBase: Partial<Record<DiagnosticoKey, string>> = {};
@@ -248,21 +270,25 @@ export default function MantenimientoPage() {
     } else {
       setMensaje(total === 0 ? 'No se detectaron inconsistencias.' : 'Diagnóstico completado.');
     }
+    if (process.env.NODE_ENV !== 'production') console.debug('[SpendWise][mantenimiento] registros diagnosticados', { email: usuarioEmail, grupo_id: grupoId, gastos: gastos.length, cuotas: cuotas.length, calendarios: calendarios.length, compras_iniciales: comprasIniciales.size });
     setCargando(false);
   }
 
   async function marcarCompromisoCancelado(cuota: AnyObj) {
     if (!window.confirm('Este compromiso no tiene un gasto activo asociado. ¿Querés marcarlo como cancelado para excluirlo del flujo y del diagnóstico activo?')) return;
-    await supabase.from('cuotas_tarjeta').update({ estado: 'cancelada', actualizado_en: new Date().toISOString() }).eq('id', cuota.id);
+    if (!grupoId) return setMensaje('Cargando grupo…');
+    await supabase.from('cuotas_tarjeta').update({ estado: 'cancelada', actualizado_en: new Date().toISOString() }).eq('id', cuota.id).eq('grupo_id', grupoId);
     setMensaje('Compromiso marcado como cancelado.');
     await diagnosticar();
   }
   async function abrirDetalleGastoDesdeCuota(cuota: AnyObj) {
+    if (!grupoId) return setMensaje('Cargando grupo…');
     if (!cuota.gasto_id) return;
     const { data: gasto, error } = await supabase
       .from('gastos')
       .select('id,fecha_gasto,establecimiento,monto,moneda,estado_registro,observaciones,persona:personas(nombre,apellido),categoria:categorias(nombre),cuenta:cuentas_tarjeta(nombre_cuenta),tarjeta:tarjetas_fisicas(alias,tipo,ultimos_4_digitos),medio_pago:medios_pago(tipo),comprobante:comprobantes(id)')
       .eq('id', cuota.gasto_id)
+      .eq('grupo_id', grupoId)
       .maybeSingle();
     if (error || !gasto) {
       setMensaje('No se pudo cargar el detalle completo del gasto.');
@@ -272,8 +298,9 @@ export default function MantenimientoPage() {
   }
 
   async function abrirDetalleCargaInicialDesdeCuota(cuota: AnyObj) {
+    if (!grupoId) return setMensaje('Cargando grupo…');
     if (!cuota.compra_cuota_inicial_id) return;
-    const { data: compra, error } = await supabase.from('compras_cuotas_iniciales').select('id,fecha_compra_original,establecimiento,descripcion_compra,monto_cuota,moneda,cuota_inicio_pendiente,total_cuotas,periodo_inicio_pago,estado,observaciones,persona:personas(nombre,apellido),cuenta:cuentas_tarjeta(nombre_cuenta)').eq('id', cuota.compra_cuota_inicial_id).maybeSingle();
+    const { data: compra, error } = await supabase.from('compras_cuotas_iniciales').select('id,fecha_compra_original,establecimiento,descripcion_compra,monto_cuota,moneda,cuota_inicio_pendiente,total_cuotas,periodo_inicio_pago,estado,observaciones,persona:personas(nombre,apellido),cuenta:cuentas_tarjeta(nombre_cuenta)').eq('id', cuota.compra_cuota_inicial_id).eq('grupo_id', grupoId).maybeSingle();
     if (error || !compra) {
       setMensaje('No se pudo cargar el detalle de la carga inicial.');
       return;
@@ -291,7 +318,8 @@ export default function MantenimientoPage() {
         setMensaje('No se pudo inferir el período de resumen de esta carga inicial. Revisá la carga inicial manualmente.');
         return;
       }
-      await obtenerOCrearCalendarioEstimado({ supabase, cuenta: { id: c.cuenta_tarjeta_id, nombre_cuenta: c.cuenta?.nombre_cuenta, dia_cierre_habitual: c.cuenta?.dia_cierre_habitual ?? null, dias_hasta_vencimiento: c.cuenta?.dias_hasta_vencimiento ?? null }, periodo: periodoResumen, contexto: 'calendario' });
+      if (!grupoId) return setMensaje('Cargando grupo…');
+    await obtenerOCrearCalendarioEstimado({ supabase, grupoId, cuenta: { id: c.cuenta_tarjeta_id, nombre_cuenta: c.cuenta?.nombre_cuenta, dia_cierre_habitual: c.cuenta?.dia_cierre_habitual ?? null, dias_hasta_vencimiento: c.cuenta?.dias_hasta_vencimiento ?? null }, periodo: periodoResumen, contexto: 'calendario' });
       const observacionCargaInicial = c.modo_regeneracion === 'periodo_pago'
         ? `Calendario regenerado para período de pago de carga inicial (${periodoResumen}).`
         : `Calendario regenerado correctamente para período resumen ${periodoResumen}.`;
@@ -304,11 +332,12 @@ export default function MantenimientoPage() {
       return;
     }
     const calculo = estimarPeriodoResumenYPago(c.gasto.fecha_gasto, c.cuenta?.dia_cierre_habitual ?? null, c.cuenta?.dias_hasta_vencimiento ?? null);
-    await obtenerOCrearCalendarioEstimado({ supabase, cuenta: { id: c.cuenta_tarjeta_id, nombre_cuenta: c.cuenta?.nombre_cuenta, dia_cierre_habitual: c.cuenta?.dia_cierre_habitual ?? null, dias_hasta_vencimiento: c.cuenta?.dias_hasta_vencimiento ?? null }, periodo: calculo.periodo_resumen, contexto: 'calendario' });
+    if (!grupoId) return setMensaje('Cargando grupo…');
+    await obtenerOCrearCalendarioEstimado({ supabase, grupoId, cuenta: { id: c.cuenta_tarjeta_id, nombre_cuenta: c.cuenta?.nombre_cuenta, dia_cierre_habitual: c.cuenta?.dia_cierre_habitual ?? null, dias_hasta_vencimiento: c.cuenta?.dias_hasta_vencimiento ?? null }, periodo: calculo.periodo_resumen, contexto: 'calendario' });
     setMensaje(`Calendario regenerado correctamente para período resumen ${calculo.periodo_resumen}.`);
     await diagnosticar();
   }
-  async function consolidarGrupo(grupo: { items: CalendarioTarjetaDB[] }) { await consolidarDuplicadosCalendario(supabase, grupo.items); setMensaje('Duplicados consolidados.'); await diagnosticar(); }
+  async function consolidarGrupo(grupo: { items: CalendarioTarjetaDB[] }) { if (!grupoId) return setMensaje('Cargando grupo…'); await consolidarDuplicadosCalendario(supabase, grupo.items, grupoId); setMensaje('Duplicados consolidados.'); await diagnosticar(); }
   async function repararSeguro() { for (const c of data.compromisosSinCalendario) await regenerarCalendario(c); for (const g of data.duplicadosCalendario) await consolidarGrupo(g); setMensaje('Reparación automática segura finalizada: se regeneraron calendarios faltantes y se consolidaron duplicados claros.'); await diagnosticar(); }
 
   const cards = useMemo(() => [
@@ -324,7 +353,7 @@ export default function MantenimientoPage() {
 
   return <main className="space-y-4 p-4 md:p-6">{/* UI abreviada por cambios */}
     <h1 className="text-2xl font-semibold">Mantenimiento</h1>
-    <div className="flex flex-wrap gap-2"><button onClick={() => void diagnosticar()} disabled={cargando} className="rounded-lg bg-slate-900 px-4 py-2 text-white">{cargando ? 'Ejecutando...' : 'Ejecutar diagnóstico'}</button><button onClick={() => void repararSeguro()} className="rounded-lg border px-4 py-2">Reparar automáticamente lo seguro</button></div>
+    <div className="flex flex-wrap gap-2"><button onClick={() => void diagnosticar()} disabled={cargando || !grupoId} className="rounded-lg bg-slate-900 px-4 py-2 text-white">{cargando ? 'Ejecutando...' : 'Ejecutar diagnóstico'}</button><button onClick={() => void repararSeguro()} className="rounded-lg border px-4 py-2">Reparar automáticamente lo seguro</button></div>
     {mensaje && <p className="text-sm text-slate-600">{mensaje}</p>}
     <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{cards.map((c) => <div key={c.key} className={`rounded-xl border bg-white p-4 text-left ${cardSeleccionada === c.key ? 'border-slate-900 ring-1 ring-slate-900' : ''}`}><p className="text-xs text-slate-500">{c.titulo}</p>{c.error ? <><p className="mt-1 text-sm font-semibold text-rose-700">Error al diagnosticar</p><p className="mt-1 text-xs text-slate-600">Ver error abajo.</p><div className="mt-2 flex gap-2">{esDesarrollo && <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => void navigator.clipboard.writeText(`Error en ${c.titulo}: ${c.error}`)}>Copiar error</button>}<button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => setCardSeleccionada(c.key)}>Ver error</button></div>{cardSeleccionada === c.key && esDesarrollo && <p className="mt-2 break-words rounded bg-rose-50 p-2 text-xs text-rose-800">Error en {c.titulo}: {c.error}</p>}</> : <button onClick={() => c.valor > 0 && setCardSeleccionada(c.key)} className={`${c.valor > 0 ? 'cursor-pointer hover:border-slate-400' : 'cursor-default opacity-80'}`}><p className="text-2xl font-bold">{c.valor}</p></button>}</div>)}</section>
     {cardSeleccionada === 'compromisosSinCalendario' && <section className="space-y-2 rounded-xl border bg-white p-4"><p className="text-sm text-slate-600">Estos compromisos activos sí se pueden reparar regenerando calendario de resumen. El período de pago se muestra solo como referencia de flujo.</p>{data.compromisosSinCalendario.map((c) => <div key={c.id} className="rounded-lg border p-3 text-sm md:grid md:grid-cols-10 md:gap-2"><span>{c.cuenta?.nombre_cuenta}</span><span>{c.gasto?.fecha_gasto ?? '-'}</span><span>{c.periodo_resumen_faltante ?? '-'}</span><span>{c.periodo_pago_flujo ?? c.periodo_pago_estimado}</span><span>{c.establecimiento}</span><span>{c.monto_cuota}</span><span>{c.persona?.nombre}</span><span>{c.origen_cuota === 'carga_inicial' ? 'Carga inicial' : c.origen_cuota}</span><span>{c.estado}</span><div className="flex gap-2"><button onClick={() => void regenerarCalendario(c)} className="rounded border px-2">Regenerar calendario</button>{c.origen_cuota === 'carga_inicial' ? (c.compra_cuota_inicial_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleCargaInicialDesdeCuota(c)}>Ver carga inicial</button> : <span className="text-xs text-slate-500">Sin referencia de carga inicial</span>) : (c.gasto_id ? <button className="rounded border px-2" onClick={() => void abrirDetalleGastoDesdeCuota(c)}>Ver gasto</button> : <span className="text-xs text-slate-500">Gasto no disponible</span>)}</div></div>)}</section>}

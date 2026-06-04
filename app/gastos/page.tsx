@@ -140,7 +140,18 @@ export default function Page() {
   const inputSubirRef = useRef<HTMLInputElement | null>(null);
   const inputCamaraRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => { (async () => { const perfil = await obtenerPerfilActivo(); setGrupoId(perfil.grupo_id); const { data: authData } = await supabase.auth.getUser(); setUsuarioEmail(authData.user?.email ?? null); })(); }, []);
+  useEffect(() => {
+    (async () => {
+      try {
+        const perfil = await obtenerPerfilActivo();
+        setGrupoId(perfil.grupo_id);
+        setUsuarioEmail(perfil.email);
+        if (process.env.NODE_ENV !== 'production') console.debug('[SpendWise][gastos] grupo_id usado', perfil.grupo_id, { email: perfil.email });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'No se pudo cargar el grupo activo.');
+      }
+    })();
+  }, []);
   useEffect(() => { if (!grupoId) return; void cargarDatos(); }, [grupoId]);
 
   const nombresCategoria = useMemo(() => new Map(categorias.map((c) => [c.id, c.nombre])), [categorias]);
@@ -213,24 +224,26 @@ export default function Page() {
   async function cargarDatos() {
     if (!grupoId) return;
     const [g, c, m, p, ct, tf, cuotasRes, cal, comp] = await Promise.all([
-      supabase.from('gastos').select('id,fecha_gasto,establecimiento,descripcion,observaciones,categoria_id,monto,moneda,medio_pago_id,persona_id,cuenta_tarjeta_id,tarjeta_fisica_id,cantidad_cuotas,estado_registro,creado_en').order('fecha_gasto', { ascending: false }),
+      supabase.from('gastos').select('id,fecha_gasto,establecimiento,descripcion,observaciones,categoria_id,monto,moneda,medio_pago_id,persona_id,cuenta_tarjeta_id,tarjeta_fisica_id,cantidad_cuotas,estado_registro,creado_en').eq('grupo_id', grupoId).order('fecha_gasto', { ascending: false }),
       supabase.from('categorias').select('id,nombre').eq('grupo_id', grupoId).order('nombre'),
       supabase.from('medios_pago').select('id,nombre,tipo').eq('grupo_id', grupoId).order('nombre'),
       supabase.from('personas').select('id,nombre,apellido').eq('grupo_id', grupoId).order('nombre'),
-      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,dia_cierre_habitual,dias_hasta_vencimiento').order('nombre_cuenta'),
-      supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,tipo,nombre_en_tarjeta,alias,ultimos_4_digitos,activo').order('id'),
-      supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,motivo_modificacion'),
-      supabase.from('calendario_tarjetas').select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones'),
-      supabase.from('comprobantes').select('id,gasto_id,nombre_archivo,tipo_archivo,ruta_storage,url_storage,proveedor_almacenamiento,url_drive,estado_archivo,creado_en').eq('estado_archivo', 'activo').order('creado_en', { ascending: false })
+      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,dia_cierre_habitual,dias_hasta_vencimiento').eq('grupo_id', grupoId).order('nombre_cuenta'),
+      supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,tipo,nombre_en_tarjeta,alias,ultimos_4_digitos,activo').eq('grupo_id', grupoId).order('id'),
+      supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,motivo_modificacion').eq('grupo_id', grupoId),
+      supabase.from('calendario_tarjetas').select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones').eq('grupo_id', grupoId),
+      supabase.from('comprobantes').select('id,gasto_id,nombre_archivo,tipo_archivo,ruta_storage,url_storage,proveedor_almacenamiento,url_drive,estado_archivo,creado_en').eq('grupo_id', grupoId).eq('estado_archivo', 'activo').order('creado_en', { ascending: false })
     ]);
     if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error || cal.error || comp.error) return setError('No se pudieron cargar los datos de gastos.');
+    if (process.env.NODE_ENV !== 'production') console.debug('[SpendWise][gastos] registros cargados', { email: usuarioEmail, grupo_id: grupoId, gastos: g.data?.length ?? 0, cuotas: cuotasRes.data?.length ?? 0, comprobantes: comp.data?.length ?? 0 });
     setGastos((g.data ?? []) as Gasto[]); setCategorias((c.data ?? []) as OpcionBase[]); setMediosPago((m.data ?? []) as OpcionBase[]); setPersonas((p.data ?? []) as Persona[]); setCuentasTarjeta((ct.data ?? []) as CuentaTarjeta[]); setTarjetasFisicas((tf.data ?? []) as TarjetaFisica[]); setCuotas((cuotasRes.data ?? []) as CuotaTarjeta[]); setCalendarios((cal.data ?? []) as CalendarioTarjeta[]); setComprobantes((comp.data ?? []) as Comprobante[]);
   }
 
 
   async function asegurarCalendarioConversion(cuenta: CuentaTarjeta, periodo: string) {
+    if (!grupoId) throw new Error('No se pudo cargar el grupo activo.');
     try {
-      const resultado = await obtenerOCrearCalendarioEstimado({ supabase, cuenta, periodo, contexto: 'conversion' });
+      const resultado = await obtenerOCrearCalendarioEstimado({ supabase, cuenta, periodo, contexto: 'conversion', grupoId });
       const calendario = resultado.calendario as CalendarioTarjeta;
       setCalendarios((prev) => {
         const sinMismoPeriodo = prev.filter((cal) => !(cal.cuenta_tarjeta_id === cuenta.id && cal.periodo_resumen === periodo));
@@ -245,6 +258,7 @@ export default function Page() {
 
   async function guardarEdicion(event: FormEvent) {
     event.preventDefault();
+    if (!grupoId) return setError('Cargando grupo…');
     if (!gastoEditando) return;
     const original = gastos.find((g) => g.id === gastoEditando.id);
     if (!original) return;
@@ -268,7 +282,7 @@ export default function Page() {
       ...(tieneCuotas ? { tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id } : { fecha_gasto: gastoEditando.fecha_gasto, monto: gastoEditando.monto, medio_pago_id: gastoEditando.medio_pago_id, cuenta_tarjeta_id: nuevoTarjeta ? gastoEditando.cuenta_tarjeta_id : null, tarjeta_fisica_id: nuevoTarjeta ? gastoEditando.tarjeta_fisica_id : null, cantidad_cuotas: nuevoTarjeta ? 1 : 1 }),
     };
     try {
-      const { error: e } = await supabase.from('gastos').update(payload).eq('id', gastoEditando.id);
+      const { error: e } = await supabase.from('gastos').update(payload).eq('id', gastoEditando.id).eq('grupo_id', grupoId);
       if (e) throw e;
       if (!tieneCuotas && !originalTarjeta && nuevoTarjeta) {
         const cuenta = cuentasTarjeta.find((c) => c.id === gastoEditando.cuenta_tarjeta_id);
@@ -324,7 +338,7 @@ export default function Page() {
           persona_id: original.persona_id,
           descripcion: original.descripcion,
           observaciones: original.observaciones,
-        }).eq('id', gastoEditando.id);
+        }).eq('id', gastoEditando.id).eq('grupo_id', grupoId);
         return setError(error instanceof Error && error.message === 'FALTA_CONFIG_CALENDARIO'
           ? 'Esta cuenta no tiene configuración habitual de cierre/vencimiento. Completala en Tarjetas o cargá el calendario manualmente.'
           : 'No se pudo convertir el gasto a tarjeta de crédito. Revisá la cuenta, tarjeta y calendario.');
@@ -332,13 +346,14 @@ export default function Page() {
       return setError('No se pudo guardar la edición.');
     }
     if (tieneCuotas) {
-      if (original.persona_id !== gastoEditando.persona_id) await supabase.from('cuotas_tarjeta').update({ persona_id: gastoEditando.persona_id }).eq('gasto_id', gastoEditando.id).not('estado', 'in', '("pagada","cancelada")');
-      if (original.tarjeta_fisica_id !== gastoEditando.tarjeta_fisica_id) await supabase.from('cuotas_tarjeta').update({ tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id }).eq('gasto_id', gastoEditando.id).not('estado', 'in', '("pagada","cancelada")');
+      if (original.persona_id !== gastoEditando.persona_id) await supabase.from('cuotas_tarjeta').update({ persona_id: gastoEditando.persona_id }).eq('gasto_id', gastoEditando.id).eq('grupo_id', grupoId).not('estado', 'in', '("pagada","cancelada")');
+      if (original.tarjeta_fisica_id !== gastoEditando.tarjeta_fisica_id) await supabase.from('cuotas_tarjeta').update({ tarjeta_fisica_id: gastoEditando.tarjeta_fisica_id }).eq('gasto_id', gastoEditando.id).eq('grupo_id', grupoId).not('estado', 'in', '("pagada","cancelada")');
     }
     if (!(!tieneCuotas && !originalTarjeta && nuevoTarjeta)) setMensajeExito('Gasto actualizado correctamente.'); setGastoEditando(null); await cargarDatos();
   }
 
   async function actualizarCuotaAsociada(cuota: CuotaTarjeta, cambios: { periodo_pago_estimado: string; observaciones: string | null }) {
+    if (!grupoId) return setError('Cargando grupo…');
     if (!ESTADOS_EDITABLES_CUOTA.has(cuota.estado)) return;
     const payload = {
       periodo_pago_estimado: cambios.periodo_pago_estimado,
@@ -346,7 +361,7 @@ export default function Page() {
       estado: 'reprogramada',
       motivo_modificacion: 'Período modificado manualmente desde historial de gastos.',
     };
-    const { error: cuotaError } = await supabase.from('cuotas_tarjeta').update(payload).eq('id', cuota.id);
+    const { error: cuotaError } = await supabase.from('cuotas_tarjeta').update(payload).eq('id', cuota.id).eq('grupo_id', grupoId);
     if (cuotaError) return setError('No se pudo actualizar la cuota asociada.');
     setMensajeExito('Se actualizó el período estimado de pago de la cuota.');
     await cargarDatos();
@@ -405,6 +420,7 @@ export default function Page() {
   }
 
   async function agregarComprobanteAGasto(gastoId: string, archivo: File | null) {
+    if (!grupoId) return setError('Cargando grupo…');
     if (!archivo) return;
     const validacion = validarComprobante(archivo);
     if (!validacion.valido) return setError(validacion.mensaje);
@@ -413,7 +429,7 @@ export default function Page() {
       const anio = String(fecha.getFullYear());
       const mes = String(fecha.getMonth() + 1).padStart(2, '0');
       const nombreArchivo = normalizarNombreArchivo(archivo.name);
-      const familiaId = await obtenerGrupoIdActual();
+      const familiaId = grupoId ?? await obtenerGrupoIdActual();
       const rutaStorage = `${familiaId}/${anio}/${mes}/${gastoId}/${nombreArchivo}`;
       const { error: errorStorage } = await supabase.storage.from('comprobantes').upload(rutaStorage, archivo, { upsert: false, contentType: archivo.type });
       if (errorStorage) {
@@ -430,6 +446,7 @@ export default function Page() {
         url_storage: urlFirmada?.signedUrl ?? null,
         proveedor_almacenamiento: 'supabase',
         estado_archivo: 'activo',
+        grupo_id: familiaId,
         tamano_bytes: archivo.size,
       });
       if (error) throw error;
@@ -443,8 +460,9 @@ export default function Page() {
   }
 
   async function anularGasto(gasto: Gasto) {
-    await supabase.from('gastos').update({ estado_registro: 'anulado' }).eq('id', gasto.id);
-    await supabase.from('cuotas_tarjeta').update({ estado: 'cancelada' }).eq('gasto_id', gasto.id).neq('estado', 'pagada');
+    if (!grupoId) return setError('Cargando grupo…');
+    await supabase.from('gastos').update({ estado_registro: 'anulado' }).eq('id', gasto.id).eq('grupo_id', grupoId);
+    await supabase.from('cuotas_tarjeta').update({ estado: 'cancelada' }).eq('gasto_id', gasto.id).eq('grupo_id', grupoId).neq('estado', 'pagada');
     setMensajeExito('Gasto anulado correctamente. Las cuotas pendientes asociadas fueron canceladas.');
     await cargarDatos();
   }
