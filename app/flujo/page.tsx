@@ -151,8 +151,11 @@ export default function FlujoPage() {
   const [cuotas, setCuotas] = useState<CuotaTarjeta[]>([]);
   const [mediosPago, setMediosPago] = useState<MedioPago[]>([]);
   const [gastosDirectos, setGastosDirectos] = useState<GastoDirecto[]>([]);
+  const [grupoId, setGrupoId] = useState<string | null>(null);
+  const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorTecnico, setErrorTecnico] = useState<string | null>(null);
   const [celdaActiva, setCeldaActiva] = useState<{ tipo: 'tarjeta' | 'gasto_directo'; clave: string; periodo: string } | null>(null);
   const [mostrarDesglose, setMostrarDesglose] = useState(false);
   const [filasExpandidas, setFilasExpandidas] = useState<Record<string, boolean>>({});
@@ -167,33 +170,58 @@ export default function FlujoPage() {
   });
 
   useEffect(() => {
-    void cargarDatos();
+    (async () => {
+      try {
+        const perfil = await obtenerPerfilActivo();
+        setGrupoId(perfil.grupo_id);
+        setUsuarioEmail(perfil.email);
+        if (process.env.NODE_ENV !== 'production') console.debug('[SpendWise][flujo] grupo_id usado', perfil.grupo_id, { email: perfil.email });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'No se pudo cargar el grupo activo.');
+        setCargando(false);
+      }
+    })();
   }, []);
+
+  useEffect(() => {
+    if (!grupoId) return;
+    void cargarDatos();
+  }, [grupoId]);
 
   async function cargarDatos() {
     if (!grupoId) return;
     setCargando(true);
     setError(null);
+    setErrorTecnico(null);
 
     const [cuentasRes, personasRes, tarjetasRes, cuotasRes, mediosPagoRes, gastosRes] = await Promise.all([
-      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,activo').eq('activo', true).order('nombre_cuenta'),
+      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta,activo').eq('grupo_id', grupoId).eq('activo', true).order('nombre_cuenta'),
       supabase.from('personas').select('id,nombre,apellido').eq('grupo_id', grupoId).order('nombre'),
-      supabase.from('tarjetas_fisicas').select('id,alias,tipo,ultimos_4_digitos').order('alias'),
+      supabase.from('tarjetas_fisicas').select('id,alias,tipo,ultimos_4_digitos').eq('grupo_id', grupoId).order('alias'),
       supabase
         .from('cuotas_tarjeta')
         .select('id,gasto_id,compra_cuota_inicial_id,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,establecimiento,descripcion_cuota,numero_cuota,total_cuotas,monto_cuota,moneda,periodo_pago_estimado,estado,origen_cuota,observaciones')
+        .eq('grupo_id', grupoId)
         .not('estado', 'in', '(cancelada)'),
       supabase.from('medios_pago').select('id,nombre,tipo,activo').eq('activo', true).eq('grupo_id', grupoId).order('nombre'),
       supabase
         .from('gastos')
         .select('id,fecha_gasto,monto,moneda,establecimiento,descripcion,observaciones,persona_id,medio_pago_id,estado_registro,categoria:categorias(nombre),persona:personas(nombre,apellido),medio_pago:medios_pago(nombre,tipo)')
+        .eq('grupo_id', grupoId)
         .neq('estado_registro', 'anulado'),
     ]);
 
     if (cuentasRes.error || personasRes.error || tarjetasRes.error || cuotasRes.error || mediosPagoRes.error || gastosRes.error) {
       const primerError = cuentasRes.error ?? personasRes.error ?? tarjetasRes.error ?? cuotasRes.error ?? mediosPagoRes.error ?? gastosRes.error;
-      console.error(primerError);
+      console.error('Error cargando flujo mensual', {
+        message: primerError?.message,
+        code: primerError?.code,
+        details: primerError?.details,
+        hint: primerError?.hint,
+        raw: primerError,
+      });
       setError('No se pudo cargar el flujo mensual. Revisá la conexión con Supabase.');
+      setErrorTecnico(JSON.stringify({ message: primerError?.message, code: primerError?.code, details: primerError?.details, hint: primerError?.hint }, null, 2));
       setCargando(false);
       return;
     }
@@ -203,7 +231,8 @@ export default function FlujoPage() {
     setTarjetas((tarjetasRes.data ?? []) as TarjetaFisica[]);
     setCuotas((cuotasRes.data ?? []) as CuotaTarjeta[]);
     setMediosPago((mediosPagoRes.data ?? []) as MedioPago[]);
-    setGastosDirectos((gastosRes.data ?? []) as GastoDirecto[]);
+    setGastosDirectos((gastosRes.data ?? []) as unknown as GastoDirecto[]);
+    if (process.env.NODE_ENV !== 'production') console.debug('[SpendWise][flujo] registros cargados', { email: usuarioEmail, grupo_id: grupoId, cuentas: cuentasRes.data?.length ?? 0, cuotas: cuotasRes.data?.length ?? 0, gastos_directos: gastosRes.data?.length ?? 0 });
     setCargando(false);
   }
 
@@ -493,7 +522,7 @@ export default function FlujoPage() {
         </div>
       )}
 
-      {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+      {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700"><p>{error}</p>{process.env.NODE_ENV !== 'production' && errorTecnico ? <details className="mt-2"><summary className="cursor-pointer font-medium">Ver error técnico</summary><pre className="mt-2 whitespace-pre-wrap break-words text-xs">{errorTecnico}</pre></details> : null}</div>}
       {cargando && <p className="rounded-xl border bg-white px-3 py-2 text-sm">Cargando flujo mensual...</p>}
 
       {!cargando && !error && cuentasVisibles.length === 0 && mediosPagoVisibles.length === 0 && (
