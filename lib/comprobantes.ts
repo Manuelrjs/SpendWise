@@ -1,6 +1,15 @@
+export const BUCKET_COMPROBANTES = 'comprobantes';
 export const TAMANO_MAXIMO_COMPROBANTE_BYTES = 10 * 1024 * 1024;
 export const MENSAJE_ERROR_BUCKET_COMPROBANTES = 'No se pudo subir el comprobante. Verificá que el bucket comprobantes exista en Supabase Storage.';
 const TIPOS_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+
+type CrearRutaStorageParams = {
+  grupoId: string;
+  gastoId: string;
+  nombreArchivo: string;
+  fechaGasto?: string | null;
+  fechaActual?: Date;
+};
 
 export function validarComprobante(archivo: File) {
   if (!TIPOS_PERMITIDOS.includes(archivo.type)) {
@@ -13,5 +22,33 @@ export function validarComprobante(archivo: File) {
 }
 
 export function normalizarNombreArchivo(nombreArchivo: string) {
-  return nombreArchivo.toLowerCase().replace(/[^a-z0-9._-]/g, '-').replace(/-+/g, '-');
+  const nombreSinRuta = nombreArchivo.split(/[\\/]/).pop() ?? 'comprobante';
+  const nombreNormalizado = nombreSinRuta
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9._-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[.-]+|[.-]+$/g, '');
+  return nombreNormalizado || 'comprobante';
+}
+
+function obtenerFechaParaRuta(fechaGasto?: string | null, fechaActual = new Date()) {
+  if (!fechaGasto) return fechaActual;
+  const fecha = new Date(`${fechaGasto}T00:00:00`);
+  return Number.isNaN(fecha.getTime()) ? fechaActual : fecha;
+}
+
+export function crearRutaStorageComprobante({ grupoId, gastoId, nombreArchivo, fechaGasto, fechaActual }: CrearRutaStorageParams) {
+  const fecha = obtenerFechaParaRuta(fechaGasto, fechaActual);
+  const anio = String(fecha.getFullYear());
+  const mes = String(fecha.getMonth() + 1).padStart(2, '0');
+  const nombreSeguro = normalizarNombreArchivo(nombreArchivo);
+  const sufijoUnico = `${Date.now()}-${crypto.randomUUID()}`;
+  return `${grupoId}/${anio}/${mes}/${gastoId}/${sufijoUnico}-${nombreSeguro}`;
+}
+
+export function pathComprobantePerteneceAGrupo(rutaStorage: string | null | undefined, grupoId: string | null | undefined) {
+  if (!rutaStorage || !grupoId) return false;
+  return rutaStorage.split('/')[0] === grupoId;
 }

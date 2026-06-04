@@ -3,7 +3,7 @@
 import { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
-import { MENSAJE_ERROR_BUCKET_COMPROBANTES, normalizarNombreArchivo, validarComprobante } from '@/lib/comprobantes';
+import { BUCKET_COMPROBANTES, MENSAJE_ERROR_BUCKET_COMPROBANTES, crearRutaStorageComprobante, pathComprobantePerteneceAGrupo, validarComprobante } from '@/lib/comprobantes';
 import {
   calcularPeriodoResumenYVencimiento,
   calcularPeriodoTarjeta,
@@ -64,7 +64,9 @@ type Comprobante = {
   nombre_archivo: string | null;
   tipo_archivo: string;
   ruta_storage: string | null;
+  storage_path?: string | null;
   url_storage: string | null;
+  mime_type?: string | null;
   proveedor_almacenamiento: string | null;
   url_drive: string | null;
   estado_archivo: string | null;
@@ -137,6 +139,8 @@ export default function Page() {
   const [comprobantePreviewAbierto, setComprobantePreviewAbierto] = useState(false);
   const [gastoPreviewId, setGastoPreviewId] = useState<string | null>(null);
   const [indicePreview, setIndicePreview] = useState(0);
+  const [urlComprobanteFirmada, setUrlComprobanteFirmada] = useState<string | null>(null);
+  const [errorAccesoComprobante, setErrorAccesoComprobante] = useState<string | null>(null);
   const inputSubirRef = useRef<HTMLInputElement | null>(null);
   const inputCamaraRef = useRef<HTMLInputElement | null>(null);
 
@@ -173,12 +177,6 @@ export default function Page() {
     acc.set(comprobante.gasto_id, (acc.get(comprobante.gasto_id) ?? 0) + 1);
     return acc;
   }, new Map<string, number>()), [comprobantes]);
-
-  const gastosConComprobantePdf = useMemo(() => new Set(
-    comprobantes
-      .filter((comprobante) => comprobante.tipo_archivo === 'application/pdf')
-      .map((comprobante) => comprobante.gasto_id),
-  ), [comprobantes]);
 
   const cuotasPorGasto = useMemo(() => cuotas.reduce((acc, cuota) => {
     if (!cuota.gasto_id) return acc;
@@ -232,7 +230,7 @@ export default function Page() {
       supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,tipo,nombre_en_tarjeta,alias,ultimos_4_digitos,activo').eq('grupo_id', grupoId).order('id'),
       supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,motivo_modificacion').eq('grupo_id', grupoId),
       supabase.from('calendario_tarjetas').select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones').eq('grupo_id', grupoId),
-      supabase.from('comprobantes').select('id,gasto_id,nombre_archivo,tipo_archivo,ruta_storage,url_storage,proveedor_almacenamiento,url_drive,estado_archivo,creado_en').eq('grupo_id', grupoId).eq('estado_archivo', 'activo').order('creado_en', { ascending: false })
+      supabase.from('comprobantes').select('id,gasto_id,nombre_archivo,tipo_archivo,mime_type,ruta_storage,storage_path,url_storage,proveedor_almacenamiento,url_drive,estado_archivo,creado_en').eq('grupo_id', grupoId).eq('estado_archivo', 'activo').order('creado_en', { ascending: false })
     ]);
     if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error || cal.error || comp.error) return setError('No se pudieron cargar los datos de gastos.');
     if (process.env.NODE_ENV !== 'production') console.debug('[SpendWise][gastos] registros cargados', { email: usuarioEmail, grupo_id: grupoId, gastos: g.data?.length ?? 0, cuotas: cuotasRes.data?.length ?? 0, comprobantes: comp.data?.length ?? 0 });
@@ -425,31 +423,38 @@ export default function Page() {
     const validacion = validarComprobante(archivo);
     if (!validacion.valido) return setError(validacion.mensaje);
     try {
-      const fecha = new Date();
-      const anio = String(fecha.getFullYear());
-      const mes = String(fecha.getMonth() + 1).padStart(2, '0');
-      const nombreArchivo = normalizarNombreArchivo(archivo.name);
-      const familiaId = grupoId ?? await obtenerGrupoIdActual();
-      const rutaStorage = `${familiaId}/${anio}/${mes}/${gastoId}/${nombreArchivo}`;
-      const { error: errorStorage } = await supabase.storage.from('comprobantes').upload(rutaStorage, archivo, { upsert: false, contentType: archivo.type });
+      const grupoActualId = grupoId ?? await obtenerGrupoIdActual();
+      const gasto = gastos.find((item) => item.id === gastoId);
+      const rutaStorage = crearRutaStorageComprobante({
+        grupoId: grupoActualId,
+        gastoId,
+        nombreArchivo: archivo.name,
+        fechaGasto: gasto?.fecha_gasto,
+      });
+      const { error: errorStorage } = await supabase.storage.from(BUCKET_COMPROBANTES).upload(rutaStorage, archivo, { upsert: false, contentType: archivo.type });
       if (errorStorage) {
         console.error(errorStorage);
         return setError(MENSAJE_ERROR_BUCKET_COMPROBANTES);
       }
-      const { data: urlFirmada } = await supabase.storage.from('comprobantes').createSignedUrl(rutaStorage, 60 * 60 * 24 * 7);
       const { error } = await supabase.from('comprobantes').insert({
         gasto_id: gastoId,
         tipo_comprobante: archivo.type === 'application/pdf' ? 'factura_pdf' : 'ticket_imagen',
         tipo_archivo: archivo.type,
+        mime_type: archivo.type,
         nombre_archivo: archivo.name,
         ruta_storage: rutaStorage,
-        url_storage: urlFirmada?.signedUrl ?? null,
+        storage_path: rutaStorage,
+        url_storage: null,
         proveedor_almacenamiento: 'supabase',
         estado_archivo: 'activo',
-        grupo_id: familiaId,
+        grupo_id: grupoActualId,
         tamano_bytes: archivo.size,
       });
-      if (error) throw error;
+      if (error) {
+        const { error: errorEliminar } = await supabase.storage.from(BUCKET_COMPROBANTES).remove([rutaStorage]);
+        if (errorEliminar) console.warn('No se pudo eliminar el comprobante subido sin metadata.', errorEliminar);
+        throw error;
+      }
       setMensajeExito('Comprobante agregado correctamente.');
       setComprobanteNuevo(null);
       await cargarDatos();
@@ -467,10 +472,18 @@ export default function Page() {
     await cargarDatos();
   }
 
-  function obtenerUrlComprobante(comprobante: Comprobante) {
+  async function generarUrlComprobante(comprobante: Comprobante) {
+    if (!grupoId) return null;
     if (comprobante.proveedor_almacenamiento === 'google_drive' && comprobante.url_drive) return comprobante.url_drive;
-    if (comprobante.url_storage) return comprobante.url_storage;
-    return null;
+    const ruta = comprobante.storage_path ?? comprobante.ruta_storage;
+    if (ruta && pathComprobantePerteneceAGrupo(ruta, grupoId)) {
+      const { data, error } = await supabase.storage.from(BUCKET_COMPROBANTES).createSignedUrl(ruta, 60 * 10);
+      if (!error && data?.signedUrl) return data.signedUrl;
+      console.warn('No se pudo generar signed URL para comprobante.', error);
+    } else if (process.env.NODE_ENV !== 'production') {
+      console.warn('Comprobante con ruta antigua o sin grupo_id en Storage.', { comprobante_id: comprobante.id, ruta });
+    }
+    return comprobante.url_storage ?? null;
   }
 
   function esImagen(tipoArchivo: string) {
@@ -481,9 +494,37 @@ export default function Page() {
     return tipoArchivo.toLowerCase() === 'application/pdf';
   }
 
+  function etiquetaComprobanteGasto(gastoId: string) {
+    const comprobantesDelGasto = comprobantes.filter((comprobante) => comprobante.gasto_id === gastoId);
+    if (comprobantesDelGasto.some((comprobante) => esPdf(comprobante.tipo_archivo))) return 'Con comprobante · PDF';
+    if (comprobantesDelGasto.some((comprobante) => esImagen(comprobante.tipo_archivo))) return 'Con comprobante · Imagen';
+    return 'Con comprobante';
+  }
+
   const comprobantesGastoPreview = useMemo(() => gastoPreviewId ? comprobantes.filter((c) => c.gasto_id === gastoPreviewId) : [], [comprobantes, gastoPreviewId]);
   const comprobantePreview = comprobantesGastoPreview[indicePreview] ?? null;
-  const urlComprobantePreview = comprobantePreview ? obtenerUrlComprobante(comprobantePreview) : null;
+
+  useEffect(() => {
+    let cancelado = false;
+    setUrlComprobanteFirmada(null);
+    setErrorAccesoComprobante(null);
+    if (!comprobantePreview) return undefined;
+
+    void generarUrlComprobante(comprobantePreview)
+      .then((url) => {
+        if (cancelado) return;
+        setUrlComprobanteFirmada(url);
+        if (!url) setErrorAccesoComprobante('No se pudo acceder al comprobante.');
+      })
+      .catch((error) => {
+        console.error('No se pudo acceder al comprobante.', error);
+        if (!cancelado) setErrorAccesoComprobante('No se pudo acceder al comprobante.');
+      });
+
+    return () => { cancelado = true; };
+  }, [comprobantePreview, grupoId]);
+
+  const urlComprobantePreview = urlComprobanteFirmada;
 
   return <section className="space-y-4">
     <h1 className="text-2xl font-semibold">Historial de gastos {filtros.estado_registro === 'anulados' ? <span className="ml-2 rounded-full bg-rose-100 px-2 py-1 text-xs text-rose-700">Vista Anulados</span> : null}</h1>
@@ -515,7 +556,7 @@ export default function Page() {
           ? etiquetaCuota(cuotasDelGasto[0].numero_cuota, cuotasDelGasto[0].total_cuotas)
           : `${etiquetaCuota(cuotasDelGasto[0].numero_cuota, cuotasDelGasto[0].total_cuotas)} · +${cuotasDelGasto.length - 1}`)
         : (esMedioTarjetaCredito(gasto.medio_pago_id) ? 'Tarjeta sin compromiso' : String(gasto.cantidad_cuotas));
-      return <tr key={gasto.id} className={`border-t ${gasto.estado_registro === 'anulado' ? 'text-slate-400' : ''}`}><td className="px-2 py-2">{gasto.fecha_gasto}</td><td className="px-2">{gasto.establecimiento}</td><td className="px-2">{nombresCategoria.get(gasto.categoria_id)}</td><td className="px-2">{nombresPersona.get(gasto.persona_id)}</td><td className="px-2">{nombresMedioPago.get(gasto.medio_pago_id)}</td><td className="px-2">{resumenCuotas}</td><td className="px-2">{(comprobantesPorGasto.get(gasto.id) ?? 0) > 0 ? <button type="button" onClick={() => { setGastoPreviewId(gasto.id); setIndicePreview(0); setComprobantePreviewAbierto(true); }} className="cursor-pointer rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700 transition hover:bg-emerald-200">{gastosConComprobantePdf.has(gasto.id) ? 'Con comprobante PDF' : 'Con comprobante'}</button> : <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">Sin comprobante</span>}</td><td className="px-2">{gasto.estado_registro === 'anulado' ? <span className="rounded bg-rose-100 px-2 py-1 text-xs text-rose-700">Anulado</span> : null}</td><td className="px-2"><button onClick={() => setGastoEditando(gasto)} className="rounded border px-2 py-1">Editar</button>{gasto.estado_registro !== 'anulado' ? <button onClick={() => void anularGasto(gasto)} className="ml-2 rounded border border-rose-200 px-2 py-1 text-rose-700">Anular</button> : null}</td></tr>;
+      return <tr key={gasto.id} className={`border-t ${gasto.estado_registro === 'anulado' ? 'text-slate-400' : ''}`}><td className="px-2 py-2">{gasto.fecha_gasto}</td><td className="px-2">{gasto.establecimiento}</td><td className="px-2">{nombresCategoria.get(gasto.categoria_id)}</td><td className="px-2">{nombresPersona.get(gasto.persona_id)}</td><td className="px-2">{nombresMedioPago.get(gasto.medio_pago_id)}</td><td className="px-2">{resumenCuotas}</td><td className="px-2">{(comprobantesPorGasto.get(gasto.id) ?? 0) > 0 ? <button type="button" onClick={() => { setGastoPreviewId(gasto.id); setIndicePreview(0); setComprobantePreviewAbierto(true); }} className="cursor-pointer rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700 transition hover:bg-emerald-200">{etiquetaComprobanteGasto(gasto.id)}</button> : <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">Sin comprobante</span>}</td><td className="px-2">{gasto.estado_registro === 'anulado' ? <span className="rounded bg-rose-100 px-2 py-1 text-xs text-rose-700">Anulado</span> : null}</td><td className="px-2"><button onClick={() => setGastoEditando(gasto)} className="rounded border px-2 py-1">Editar</button>{gasto.estado_registro !== 'anulado' ? <button onClick={() => void anularGasto(gasto)} className="ml-2 rounded border border-rose-200 px-2 py-1 text-rose-700">Anular</button> : null}</td></tr>;
     })}</tbody></table></div>
 
     {comprobantePreviewAbierto ? <div className="fixed inset-0 z-50 flex items-end bg-slate-900/60 p-0 sm:items-center sm:justify-center sm:p-4">
@@ -532,7 +573,7 @@ export default function Page() {
               esImagen(comprobantePreview.tipo_archivo) ? <img src={urlComprobantePreview} alt={comprobantePreview.nombre_archivo ?? 'Comprobante'} className="mx-auto h-auto max-h-[55vh] w-auto rounded-lg object-contain" /> : (
                 esPdf(comprobantePreview.tipo_archivo) ? <iframe title={comprobantePreview.nombre_archivo ?? 'Comprobante PDF'} src={urlComprobantePreview} className="h-[55vh] w-full rounded-lg" /> : <p className="p-4 text-sm text-slate-600">Formato no compatible para vista previa.</p>
               )
-            ) : <p className="p-4 text-sm text-rose-700">No se pudo abrir el comprobante.</p>}
+            ) : <p className="p-4 text-sm text-rose-700">{errorAccesoComprobante ?? 'No se pudo acceder al comprobante.'}</p>}
           </div>
           {urlComprobantePreview ? <a href={urlComprobantePreview} target="_blank" rel="noreferrer" className="inline-flex rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white">Abrir en nueva pestaña</a> : null}
         </div> : <p className="text-sm text-slate-600">No hay comprobantes activos para este gasto.</p>}
@@ -564,7 +605,7 @@ export default function Page() {
       {gastoEditandoTieneCuotas ? <p className="text-xs text-slate-500">Medio de pago, fecha y monto están bloqueados para mantener consistencia con cuotas generadas.</p> : null}
       <button className="rounded-xl bg-emerald-600 px-3 py-2 text-white">Guardar cambios</button>
 
-      <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Comprobante</h3><p className="text-xs text-slate-600">Opcional: adjuntá una foto, imagen o PDF del ticket/factura.</p><p className="text-xs text-slate-500">También podés pegar una imagen copiada desde WhatsApp.</p><div tabIndex={0} onPaste={manejarPegadoComprobante} onDragOver={(event) => { event.preventDefault(); setArrastrandoComprobante(true); }} onDragLeave={() => setArrastrandoComprobante(false)} onDrop={manejarDropComprobante} className={`rounded-xl border border-dashed p-3 ${arrastrandoComprobante ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 bg-slate-50'}`}><p className="text-xs text-slate-600">Arrastrá una imagen/PDF acá o pegá una imagen copiada.</p><div className="mt-2 grid gap-2 sm:grid-cols-3"><button type="button" onClick={() => inputCamaraRef.current?.click()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Tomar foto del comprobante</button><button type="button" onClick={() => inputSubirRef.current?.click()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Subir imagen o PDF</button><button type="button" onClick={() => void pegarComprobanteDesdeBoton()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Pegar imagen copiada</button></div><input ref={inputCamaraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={manejarCambioArchivo} /><input ref={inputSubirRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={manejarCambioArchivo} /></div>{mensajeComprobante ? <p className="text-xs text-slate-500">{mensajeComprobante}</p> : null}{comprobanteNuevo ? <div className="rounded-lg border p-2 text-xs"><p className="truncate"><strong>Archivo:</strong> {comprobanteNuevo.name}</p><p><strong>Tipo:</strong> {comprobanteNuevo.type || 'Sin tipo'}</p><p><strong>Tamaño:</strong> {formatearTamanoArchivo(comprobanteNuevo.size)}</p><div className="mt-2 flex gap-2"><button type="button" onClick={() => void agregarComprobanteAGasto(gastoEditando.id, comprobanteNuevo)} className="rounded bg-emerald-600 px-2 py-1 text-white">Adjuntar comprobante</button><button type="button" onClick={() => setComprobanteNuevo(null)} className="rounded border px-2 py-1">Quitar comprobante</button></div></div> : <p className="text-xs text-slate-500">Sin comprobante seleccionado.</p>}{comprobantesGastoEditando.length === 0 ? <p className="text-xs text-slate-500">Sin comprobantes asociados.</p> : comprobantesGastoEditando.map((comprobante) => <div key={comprobante.id} className="rounded-lg border p-2 text-xs"><p className="font-medium">{comprobante.nombre_archivo ?? 'Archivo sin nombre'}</p><p className="text-slate-500">{comprobante.tipo_archivo}</p>{comprobante.url_storage ? <a href={comprobante.url_storage} target="_blank" rel="noreferrer" className="text-emerald-700 underline">Abrir / descargar</a> : <p className="text-slate-500">Sin URL disponible.</p>}</div>)}</div>
+      <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Comprobante</h3><p className="text-xs text-slate-600">Opcional: adjuntá una foto, imagen o PDF del ticket/factura.</p><p className="text-xs text-slate-500">También podés pegar una imagen copiada desde WhatsApp.</p><div tabIndex={0} onPaste={manejarPegadoComprobante} onDragOver={(event) => { event.preventDefault(); setArrastrandoComprobante(true); }} onDragLeave={() => setArrastrandoComprobante(false)} onDrop={manejarDropComprobante} className={`rounded-xl border border-dashed p-3 ${arrastrandoComprobante ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 bg-slate-50'}`}><p className="text-xs text-slate-600">Arrastrá una imagen/PDF acá o pegá una imagen copiada.</p><div className="mt-2 grid gap-2 sm:grid-cols-3"><button type="button" onClick={() => inputCamaraRef.current?.click()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Tomar foto del comprobante</button><button type="button" onClick={() => inputSubirRef.current?.click()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Subir imagen o PDF</button><button type="button" onClick={() => void pegarComprobanteDesdeBoton()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Pegar imagen copiada</button></div><input ref={inputCamaraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={manejarCambioArchivo} /><input ref={inputSubirRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={manejarCambioArchivo} /></div>{mensajeComprobante ? <p className="text-xs text-slate-500">{mensajeComprobante}</p> : null}{comprobanteNuevo ? <div className="rounded-lg border p-2 text-xs"><p className="truncate"><strong>Archivo:</strong> {comprobanteNuevo.name}</p><p><strong>Tipo:</strong> {comprobanteNuevo.type || 'Sin tipo'}</p><p><strong>Tamaño:</strong> {formatearTamanoArchivo(comprobanteNuevo.size)}</p><div className="mt-2 flex gap-2"><button type="button" onClick={() => void agregarComprobanteAGasto(gastoEditando.id, comprobanteNuevo)} className="rounded bg-emerald-600 px-2 py-1 text-white">Adjuntar comprobante</button><button type="button" onClick={() => setComprobanteNuevo(null)} className="rounded border px-2 py-1">Quitar comprobante</button></div></div> : <p className="text-xs text-slate-500">Sin comprobante seleccionado.</p>}{comprobantesGastoEditando.length === 0 ? <p className="text-xs text-slate-500">Sin comprobantes asociados.</p> : comprobantesGastoEditando.map((comprobante) => <div key={comprobante.id} className="rounded-lg border p-2 text-xs"><p className="font-medium">{comprobante.nombre_archivo ?? 'Archivo sin nombre'}</p><p className="text-slate-500">{comprobante.tipo_archivo}</p><button type="button" onClick={() => { setGastoPreviewId(comprobante.gasto_id); setIndicePreview(Math.max(0, comprobantesGastoEditando.findIndex((item) => item.id === comprobante.id))); setComprobantePreviewAbierto(true); }} className="text-emerald-700 underline">Abrir / descargar</button></div>)}</div>
 
       <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Cuotas asociadas</h3>
         {cuotasGastoEditando.map((cuota) => <div key={cuota.id} className="rounded-xl border p-2 text-sm">

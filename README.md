@@ -308,6 +308,72 @@ Desde la Tarea 30, SpendWise protege las tablas operativas con **Row Level Secur
 
 Las filas operativas con `grupo_id` nulo no cumplen ninguna política RLS y no serán visibles para usuarios autenticados. Antes de activar esta migración en un ambiente con datos reales, validar y corregir esos casos con un backfill controlado.
 
-### Storage de comprobantes
+## Storage de comprobantes
 
-La tabla `comprobantes` queda protegida por `grupo_id`, pero las políticas de Supabase Storage no se modifican en esta tarea. Queda pendiente una tarea futura para proteger el bucket/rutas de comprobantes por `grupo_id` o por una convención de path que incluya el grupo.
+Desde la Tarea 31, los comprobantes nuevos se guardan en el bucket de Supabase Storage **`comprobantes`** usando una ruta interna separada por grupo:
+
+```text
+{grupo_id}/{año}/{mes}/{gasto_id}/{timestamp}-{uuid}-{nombre_archivo_sanitizado}
+```
+
+Vista como ruta completa del bucket:
+
+```text
+comprobantes/{grupo_id}/{año}/{mes}/{gasto_id}/{archivo}
+```
+
+Ejemplo:
+
+```text
+comprobantes/7b8f0000-0000-0000-0000-000000000000/2026/06/gasto-uuid/1780000000000-uuid-factura.pdf
+```
+
+### Metadata guardada
+
+La tabla `comprobantes` guarda la metadata del archivo asociado al gasto, incluyendo:
+
+- `grupo_id`: tomado del perfil activo del usuario.
+- `gasto_id`: gasto al que pertenece el archivo.
+- `nombre_archivo`: nombre original visible para el usuario.
+- `tipo_archivo` y `mime_type`: MIME del archivo (`image/jpeg`, `image/png`, `image/webp` o `application/pdf`).
+- `ruta_storage` y `storage_path`: ruta interna dentro del bucket `comprobantes`.
+- `tamano_bytes`: tamaño del archivo cuando el navegador lo informa.
+- `creado_en`: timestamp generado por la base.
+
+### Bucket privado y signed URLs
+
+El bucket **debe ser privado**. La app ya no guarda URLs públicas permanentes para comprobantes nuevos. Para previsualizar o descargar un comprobante, el cliente genera una **signed URL temporal** contra la ruta guardada en la metadata y solo después de consultar `comprobantes` filtrando por `grupo_id`.
+
+Los comprobantes históricos no se migran en esta tarea. Si un comprobante viejo tiene `grupo_id` en metadata pero usa una ruta anterior, la app intenta mantener compatibilidad; en desarrollo muestra una advertencia en consola si la ruta no incluye el `grupo_id` esperado.
+
+### Políticas de Storage
+
+Ejecutar la migración:
+
+```sql
+supabase/migrations/009_storage_comprobantes_por_grupo.sql
+```
+
+La migración:
+
+1. Asegura columnas de metadata compatibles (`grupo_id`, `mime_type`, `storage_path`, `tamano_bytes`).
+2. Crea o actualiza el bucket `comprobantes` como privado (`public = false`).
+3. Crea políticas sobre `storage.objects` para `SELECT`, `INSERT`, `UPDATE` y `DELETE` limitadas al grupo del usuario.
+
+Para el bucket `comprobantes`, Supabase guarda el objeto con `storage.objects.name` sin el nombre del bucket. Por eso la política valida que el primer segmento de `name` coincida con el grupo del perfil:
+
+```sql
+p.grupo_id::text = (storage.foldername(name))[1]
+```
+
+### Cómo probar con dos usuarios
+
+1. Iniciar sesión con **Usuario 1** y crear/subir un comprobante a un gasto.
+2. Verificar en Storage que el archivo quedó en `comprobantes/{grupo_id_usuario_1}/AAAA/MM/{gasto_id}/...`.
+3. Verificar en la tabla `comprobantes` que `grupo_id` coincide con el grupo del Usuario 1 y que `ruta_storage` / `storage_path` empiezan con ese `grupo_id`.
+4. Abrir historial de gastos y confirmar que el Usuario 1 ve el badge **“Con comprobante · PDF”** o **“Con comprobante · Imagen”** y puede abrir la preview/descarga.
+5. Cerrar sesión e iniciar con **Usuario 2**.
+6. Confirmar que Usuario 2 no ve el comprobante del Usuario 1 en `/gastos`.
+7. Intentar abrir con Usuario 2 una ruta/signed URL generada por Usuario 1 después de vencida o generar acceso directo desde metadata ajena: debe fallar por RLS/políticas de Storage.
+8. Subir un comprobante propio con Usuario 2 y confirmar que queda bajo `comprobantes/{grupo_id_usuario_2}/...`.
+9. Volver con Usuario 1 y confirmar que no ve el comprobante del Usuario 2.
