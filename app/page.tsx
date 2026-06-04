@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
+import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
+import { registrarErrorSpendWise, type ErrorTecnico } from '@/lib/errores';
 
 type Gasto = {
   id: string;
@@ -92,8 +94,12 @@ function formatearPeriodoLargo(periodo: string) {
 
 export default function DashboardPage() {
   const [mesSeleccionado, setMesSeleccionado] = useState(obtenerPeriodoActual());
-  const [cargando, setCargando] = useState(true);
+  const [perfilCargando, setPerfilCargando] = useState(true);
+  const [grupoId, setGrupoId] = useState<string | null>(null);
+  const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
+  const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorTecnico, setErrorTecnico] = useState<ErrorTecnico | null>(null);
 
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [cuotasMes, setCuotasMes] = useState<CuotaTarjeta[]>([]);
@@ -107,18 +113,58 @@ export default function DashboardPage() {
   const [detalleCuotasAbierto, setDetalleCuotasAbierto] = useState(false);
 
   useEffect(() => {
-    void cargarDashboard(mesSeleccionado);
-  }, [mesSeleccionado]);
+    let cancelado = false;
 
-  async function cargarDashboard(periodo: string) {
+    async function cargarPerfil() {
+      setPerfilCargando(true);
+      setError(null);
+      setErrorTecnico(null);
+
+      try {
+        const perfil = await obtenerPerfilActivo();
+        if (cancelado) return;
+        setGrupoId(perfil.grupo_id);
+        setUsuarioEmail(perfil.email);
+      } catch (errorPerfil) {
+        if (cancelado) return;
+        const detalle = registrarErrorSpendWise('dashboard', errorPerfil);
+        setGrupoId(null);
+        setErrorTecnico(detalle);
+        setError('No se pudo cargar el grupo activo.');
+      } finally {
+        if (!cancelado) setPerfilCargando(false);
+      }
+    }
+
+    void cargarPerfil();
+
+    return () => {
+      cancelado = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (perfilCargando) return;
+
+    if (!grupoId) {
+      setCargando(false);
+      setError('No se pudo cargar el grupo activo.');
+      return;
+    }
+
+    void cargarDashboard(mesSeleccionado, grupoId);
+  }, [perfilCargando, grupoId, mesSeleccionado]);
+
+  async function cargarDashboard(periodo: string, grupoIdActivo: string) {
     setCargando(true);
     setError(null);
+    setErrorTecnico(null);
 
     const { inicio, fin } = obtenerLimitesMes(periodo);
     const proximoPeriodo = obtenerSiguientePeriodo(periodo);
 
-    const perfil = await obtenerPerfilActivo();
-    if (process.env.NODE_ENV !== 'production') console.debug('[dashboard] grupo activo', { email: perfil.email, grupo_id: perfil.grupo_id });
+    try {
+    if (process.env.NODE_ENV !== 'production') console.debug('[debug] /dashboard', { pantalla: '/dashboard', email: usuarioEmail, grupo_id: grupoIdActivo });
 
     const [
       gastosRes,
@@ -136,24 +182,24 @@ export default function DashboardPage() {
         .neq('estado_registro', 'anulado')
         .gte('fecha_gasto', inicio)
         .lte('fecha_gasto', fin)
-        .eq('grupo_id', perfil.grupo_id),
+        .eq('grupo_id', grupoIdActivo),
       supabase
         .from('cuotas_tarjeta')
         .select('id,monto_cuota,periodo_pago_estimado,estado,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,establecimiento,descripcion_cuota,numero_cuota,total_cuotas,origen_cuota,observaciones')
         .eq('periodo_pago_estimado', periodo)
         .not('estado', 'in', `(${ESTADOS_CUOTA_EXCLUIDOS.join(',')})`)
-        .eq('grupo_id', perfil.grupo_id),
+        .eq('grupo_id', grupoIdActivo),
       supabase
         .from('cuotas_tarjeta')
         .select('id,monto_cuota,periodo_pago_estimado,estado,cuenta_tarjeta_id,tarjeta_fisica_id,persona_id,establecimiento,descripcion_cuota,numero_cuota,total_cuotas,origen_cuota,observaciones')
         .eq('periodo_pago_estimado', proximoPeriodo)
         .not('estado', 'in', `(${ESTADOS_CUOTA_EXCLUIDOS.join(',')})`)
-        .eq('grupo_id', perfil.grupo_id),
-      supabase.from('categorias').select('id,nombre').eq('grupo_id', perfil.grupo_id),
-      supabase.from('medios_pago').select('id,nombre').eq('grupo_id', perfil.grupo_id),
-      supabase.from('personas').select('id,nombre,apellido').eq('grupo_id', perfil.grupo_id),
-      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta').eq('grupo_id', perfil.grupo_id),
-      supabase.from('tarjetas_fisicas').select('id,alias,ultimos_4_digitos').eq('grupo_id', perfil.grupo_id),
+        .eq('grupo_id', grupoIdActivo),
+      supabase.from('categorias').select('id,nombre').eq('grupo_id', grupoIdActivo),
+      supabase.from('medios_pago').select('id,nombre').eq('grupo_id', grupoIdActivo),
+      supabase.from('personas').select('id,nombre,apellido').eq('grupo_id', grupoIdActivo),
+      supabase.from('cuentas_tarjeta').select('id,nombre_cuenta').eq('grupo_id', grupoIdActivo),
+      supabase.from('tarjetas_fisicas').select('id,alias,ultimos_4_digitos').eq('grupo_id', grupoIdActivo),
     ]);
 
     if (
@@ -176,14 +222,9 @@ export default function DashboardPage() {
         cuentasRes.error ??
         tarjetasRes.error;
 
-      console.error('[dashboard] error al cargar datos', {
-        message: primerError.message,
-        code: primerError.code,
-        details: primerError.details,
-        hint: primerError.hint,
-      });
+      const detalle = registrarErrorSpendWise('dashboard', primerError);
+      setErrorTecnico(detalle);
       setError('No se pudo cargar el dashboard. Revisá la conexión con Supabase.');
-      setCargando(false);
       return;
     }
 
@@ -196,8 +237,13 @@ export default function DashboardPage() {
     setPersonas(new Map(((personasRes.data ?? []) as Persona[]).map((p) => [p.id, `${p.nombre} ${p.apellido ?? ''}`.trim()])));
     setCuentasTarjeta(new Map(((cuentasRes.data ?? []) as CuentaTarjeta[]).map((c) => [c.id, c.nombre_cuenta])));
     setTarjetasFisicas(new Map(((tarjetasRes.data ?? []) as TarjetaFisica[]).map((t) => [t.id, `${t.alias ?? 'Tarjeta sin alias'}${t.ultimos_4_digitos ? ` · ${t.ultimos_4_digitos}` : ''}`])));
-
-    setCargando(false);
+    } catch (errorCarga) {
+      const detalle = registrarErrorSpendWise('dashboard', errorCarga);
+      setErrorTecnico(detalle);
+      setError('No se pudo cargar el dashboard. Revisá la conexión con Supabase.');
+    } finally {
+      setCargando(false);
+    }
   }
 
   const gastoTotalMes = useMemo(() => gastos.reduce((acc, gasto) => acc + gasto.monto, 0), [gastos]);
@@ -298,7 +344,9 @@ export default function DashboardPage() {
         </div>
       </header>
 
+      {perfilCargando ? <p className="text-sm text-slate-500">Cargando grupo...</p> : null}
       {error ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</p> : null}
+      <ErrorTecnicoDesarrollo error={errorTecnico} />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <CardMetrica titulo="Gastos del mes" valor={formatearMonto(gastoTotalMes)} subtitulo="Suma de gastos no anulados" />

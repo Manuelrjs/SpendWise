@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
+import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
+import { registrarErrorSpendWise, type ErrorTecnico } from '@/lib/errores';
 
 type Persona = {
   id: string;
@@ -38,56 +40,95 @@ function formatearFecha(fechaIso: string) {
 }
 
 export default function Page() {
+  const [perfilCargando, setPerfilCargando] = useState(true);
   const [grupoId, setGrupoId] = useState<string | null>(null);
   const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [personas, setPersonas] = useState<Persona[]>([]);
-  const [cargando, setCargando] = useState(true);
+  const [cargando, setCargando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [personaEditandoId, setPersonaEditandoId] = useState<string | null>(null);
   const [formulario, setFormulario] = useState<FormularioPersona>(estadoInicialFormulario);
   const [errorFormulario, setErrorFormulario] = useState('');
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
+  const [errorTecnico, setErrorTecnico] = useState<ErrorTecnico | null>(null);
 
   const tituloFormulario = useMemo(
     () => (personaEditandoId ? 'Editar persona' : 'Nueva persona'),
     [personaEditandoId],
   );
 
-  async function cargarPersonas() {
-    if (!grupoId) return;
+  async function cargarPersonas(grupoIdActivo: string) {
     setCargando(true);
     setMensaje(null);
+    setErrorTecnico(null);
+
+    try {
 
     const { data, error } = await supabase
       .from('personas')
       .select('id, nombre, apellido, email, relacion_familiar, activo, creado_en, actualizado_en')
-      .eq('grupo_id', grupoId)
+      .eq('grupo_id', grupoIdActivo)
       .order('creado_en', { ascending: false });
 
     if (error) {
+      const detalle = registrarErrorSpendWise('personas', error);
+      setErrorTecnico(detalle);
       setMensaje({ tipo: 'error', texto: 'No se pudieron cargar las personas.' });
-      setCargando(false);
       return;
     }
 
     setPersonas(data ?? []);
     if (process.env.NODE_ENV !== "production") console.debug("[debug] /personas", { pantalla: "/personas", email: usuarioEmail, grupo_id: grupoId, registros: (data ?? []).length });
-    setCargando(false);
+    } catch (errorCarga) {
+      const detalle = registrarErrorSpendWise('personas', errorCarga);
+      setErrorTecnico(detalle);
+      setMensaje({ tipo: 'error', texto: 'No se pudieron cargar las personas.' });
+    } finally {
+      setCargando(false);
+    }
   }
 
   useEffect(() => {
-    (async () => {
-      const perfil = await obtenerPerfilActivo();
-      setGrupoId(perfil.grupo_id);
-      const { data: authData } = await supabase.auth.getUser();
-      setUsuarioEmail(authData.user?.email ?? null);
-    })();
-  }, [grupoId]);
+    let cancelado = false;
+
+    async function cargarPerfil() {
+      setPerfilCargando(true);
+      setErrorTecnico(null);
+
+      try {
+        const perfil = await obtenerPerfilActivo();
+        if (cancelado) return;
+        setGrupoId(perfil.grupo_id);
+        setUsuarioEmail(perfil.email);
+      } catch (errorPerfil) {
+        if (cancelado) return;
+        const detalle = registrarErrorSpendWise('personas', errorPerfil);
+        setGrupoId(null);
+        setErrorTecnico(detalle);
+        setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
+      } finally {
+        if (!cancelado) setPerfilCargando(false);
+      }
+    }
+
+    void cargarPerfil();
+
+    return () => {
+      cancelado = true;
+    };
+  }, []);
 
   useEffect(() => {
-    if (!grupoId) return;
-    void cargarPersonas();
-  }, []);
+    if (perfilCargando) return;
+
+    if (!grupoId) {
+      setCargando(false);
+      setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
+      return;
+    }
+
+    void cargarPersonas(grupoId);
+  }, [perfilCargando, grupoId]);
 
   function limpiarFormulario() {
     setPersonaEditandoId(null);
@@ -112,6 +153,8 @@ export default function Page() {
     setErrorFormulario('');
     setMensaje(null);
 
+    if (!grupoId) return setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
+
     const nombreLimpio = formulario.nombre.trim();
 
     if (!nombreLimpio) {
@@ -134,6 +177,8 @@ export default function Page() {
       : await supabase.from('personas').insert({ ...payload, grupo_id: grupoId });
 
     if (respuesta.error) {
+      const detalle = registrarErrorSpendWise('personas', respuesta.error);
+      setErrorTecnico(detalle);
       setMensaje({ tipo: 'error', texto: 'No se pudo guardar la persona.' });
       setGuardando(false);
       return;
@@ -145,11 +190,13 @@ export default function Page() {
     });
     setGuardando(false);
     limpiarFormulario();
-    await cargarPersonas();
+    if (grupoId) await cargarPersonas(grupoId);
   }
 
   async function cambiarEstadoPersona(persona: Persona, proximoEstado: boolean) {
     setMensaje(null);
+
+    if (!grupoId) return setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
 
     const { error } = await supabase
       .from('personas')
@@ -172,7 +219,7 @@ export default function Page() {
         ? `Persona ${persona.nombre} reactivada.`
         : `Persona ${persona.nombre} desactivada.`,
     });
-    await cargarPersonas();
+    if (grupoId) await cargarPersonas(grupoId);
   }
 
   return (
@@ -181,6 +228,9 @@ export default function Page() {
         <h1 className="text-2xl font-semibold">Configuración · Personas</h1>
         <p className="text-sm text-slate-600">Administrá las personas que pueden registrar gastos.</p>
       </header>
+
+      {perfilCargando ? <p className="text-sm text-slate-500">Cargando grupo...</p> : null}
+      <ErrorTecnicoDesarrollo error={errorTecnico} />
 
       {mensaje && (
         <div

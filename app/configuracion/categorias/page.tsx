@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
+import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
+import { registrarErrorSpendWise, type ErrorTecnico } from '@/lib/errores';
 
 type Categoria = {
   id: string;
@@ -38,57 +40,96 @@ function formatearFecha(fechaIso: string) {
 }
 
 export default function Page() {
+  const [perfilCargando, setPerfilCargando] = useState(true);
   const [grupoId, setGrupoId] = useState<string | null>(null);
   const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
-  const [cargando, setCargando] = useState(true);
+  const [cargando, setCargando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [categoriaEditandoId, setCategoriaEditandoId] = useState<string | null>(null);
   const [formulario, setFormulario] = useState<FormularioCategoria>(estadoInicialFormulario);
   const [errorFormulario, setErrorFormulario] = useState('');
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
+  const [errorTecnico, setErrorTecnico] = useState<ErrorTecnico | null>(null);
 
   const tituloFormulario = useMemo(
     () => (categoriaEditandoId ? 'Editar categoría' : 'Nueva categoría'),
     [categoriaEditandoId],
   );
 
-  async function cargarCategorias() {
-    if (!grupoId) return;
+  async function cargarCategorias(grupoIdActivo: string) {
     setCargando(true);
     setMensaje(null);
+    setErrorTecnico(null);
+
+    try {
 
     const { data, error } = await supabase
       .from('categorias')
       .select('id, nombre, icono, color, activo, orden, creado_en, actualizado_en')
-      .eq('grupo_id', grupoId)
+      .eq('grupo_id', grupoIdActivo)
       .order('orden', { ascending: true, nullsFirst: false })
       .order('creado_en', { ascending: false });
 
     if (error) {
+      const detalle = registrarErrorSpendWise('categorias', error);
+      setErrorTecnico(detalle);
       setMensaje({ tipo: 'error', texto: 'No se pudieron cargar las categorías.' });
-      setCargando(false);
       return;
     }
 
     setCategorias(data ?? []);
     if (process.env.NODE_ENV !== "production") console.debug("[debug] /categorias", { pantalla: "/categorias", email: usuarioEmail, grupo_id: grupoId, registros: (data ?? []).length });
-    setCargando(false);
+    } catch (errorCarga) {
+      const detalle = registrarErrorSpendWise('categorias', errorCarga);
+      setErrorTecnico(detalle);
+      setMensaje({ tipo: 'error', texto: 'No se pudieron cargar las categorías.' });
+    } finally {
+      setCargando(false);
+    }
   }
 
   useEffect(() => {
-    (async () => {
-      const perfil = await obtenerPerfilActivo();
-      setGrupoId(perfil.grupo_id);
-      const { data: authData } = await supabase.auth.getUser();
-      setUsuarioEmail(authData.user?.email ?? null);
-    })();
-  }, [grupoId]);
+    let cancelado = false;
+
+    async function cargarPerfil() {
+      setPerfilCargando(true);
+      setErrorTecnico(null);
+
+      try {
+        const perfil = await obtenerPerfilActivo();
+        if (cancelado) return;
+        setGrupoId(perfil.grupo_id);
+        setUsuarioEmail(perfil.email);
+      } catch (errorPerfil) {
+        if (cancelado) return;
+        const detalle = registrarErrorSpendWise('categorias', errorPerfil);
+        setGrupoId(null);
+        setErrorTecnico(detalle);
+        setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
+      } finally {
+        if (!cancelado) setPerfilCargando(false);
+      }
+    }
+
+    void cargarPerfil();
+
+    return () => {
+      cancelado = true;
+    };
+  }, []);
 
   useEffect(() => {
-    if (!grupoId) return;
-    void cargarCategorias();
-  }, []);
+    if (perfilCargando) return;
+
+    if (!grupoId) {
+      setCargando(false);
+      setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
+      return;
+    }
+
+    void cargarCategorias(grupoId);
+  }, [perfilCargando, grupoId]);
 
   function limpiarFormulario() {
     setCategoriaEditandoId(null);
@@ -112,6 +153,8 @@ export default function Page() {
     evento.preventDefault();
     setErrorFormulario('');
     setMensaje(null);
+
+    if (!grupoId) return setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
 
     const nombreLimpio = formulario.nombre.trim();
     if (!nombreLimpio) {
@@ -142,6 +185,8 @@ export default function Page() {
       : await supabase.from('categorias').insert({ ...payload, grupo_id: grupoId });
 
     if (respuesta.error) {
+      const detalle = registrarErrorSpendWise('categorias', respuesta.error);
+      setErrorTecnico(detalle);
       setMensaje({ tipo: 'error', texto: 'No se pudo guardar la categoría.' });
       setGuardando(false);
       return;
@@ -150,11 +195,13 @@ export default function Page() {
     setMensaje({ tipo: 'ok', texto: categoriaEditandoId ? 'Categoría actualizada con éxito.' : 'Categoría creada con éxito.' });
     setGuardando(false);
     limpiarFormulario();
-    await cargarCategorias();
+    if (grupoId) await cargarCategorias(grupoId);
   }
 
   async function cambiarEstadoCategoria(categoria: Categoria, proximoEstado: boolean) {
     setMensaje(null);
+
+    if (!grupoId) return setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
 
     const { error } = await supabase
       .from('categorias')
@@ -173,7 +220,7 @@ export default function Page() {
       tipo: 'ok',
       texto: proximoEstado ? `Categoría ${categoria.nombre} reactivada.` : `Categoría ${categoria.nombre} desactivada.`,
     });
-    await cargarCategorias();
+    if (grupoId) await cargarCategorias(grupoId);
   }
 
   return (
@@ -182,6 +229,9 @@ export default function Page() {
         <h1 className="text-2xl font-semibold">Configuración · Categorías</h1>
         <p className="text-sm text-slate-600">Administrá las categorías disponibles en SpendWise.</p>
       </header>
+
+      {perfilCargando ? <p className="text-sm text-slate-500">Cargando grupo...</p> : null}
+      <ErrorTecnicoDesarrollo error={errorTecnico} />
 
       {mensaje && <div className={`rounded-xl border px-4 py-3 text-sm ${mensaje.tipo === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{mensaje.texto}</div>}
 
