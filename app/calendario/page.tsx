@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
+import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
+import { registrarErrorSpendWise, type ErrorTecnico } from '@/lib/errores';
 import { consolidarDuplicadosCalendario, obtenerOCrearCalendarioEstimado } from '@/lib/calendario-tarjetas';
 
 type CuentaTarjeta = {
@@ -119,11 +121,12 @@ function origenLegible(origen: OrigenFecha) {
 }
 
 export default function Page() {
+  const [perfilCargando, setPerfilCargando] = useState(true);
   const [grupoId, setGrupoId] = useState<string | null>(null);
   const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [cuentas, setCuentas] = useState<CuentaTarjeta[]>([]);
   const [calendarios, setCalendarios] = useState<CalendarioTarjeta[]>([]);
-  const [cargando, setCargando] = useState(true);
+  const [cargando, setCargando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [generando, setGenerando] = useState(false);
   const [calendarioEditandoId, setCalendarioEditandoId] = useState<string | null>(null);
@@ -136,6 +139,7 @@ export default function Page() {
   const [periodosConCuotas, setPeriodosConCuotas] = useState<Set<string>>(new Set());
   const [gastosTarjeta, setGastosTarjeta] = useState<GastoTarjeta[]>([]);
   const [cuotasTarjeta, setCuotasTarjeta] = useState<CuotaTarjeta[]>([]);
+  const [errorTecnico, setErrorTecnico] = useState<ErrorTecnico | null>(null);
 
   const tituloFormulario = useMemo(
     () => (calendarioEditandoId ? 'Editar período de calendario' : 'Nuevo período de calendario'),
@@ -148,10 +152,12 @@ export default function Page() {
   );
   const hayDuplicadosVisibles = useMemo(() => calendariosCuenta.some((item) => esDuplicado(item)), [calendariosCuenta, calendarios]);
 
-  async function cargarDatos() {
-    if (!grupoId) return;
+  async function cargarDatos(grupoIdActivo: string) {
     setCargando(true);
     setMensaje(null);
+    setErrorTecnico(null);
+
+    try {
 
     const [
       { data: dataCuentas, error: errorCuentas },
@@ -164,21 +170,25 @@ export default function Page() {
         supabase
           .from('cuentas_tarjeta')
           .select('id, nombre_cuenta, banco, marca, dia_cierre_habitual, dias_hasta_vencimiento, activo')
+          .eq('grupo_id', grupoIdActivo)
           .order('nombre_cuenta', { ascending: true }),
         supabase
           .from('calendario_tarjetas')
           .select(
             'id, cuenta_tarjeta_id, periodo_resumen, fecha_cierre, fecha_vencimiento, estado_calendario, origen_fecha, observaciones, creado_en, actualizado_en',
           )
+          .eq('grupo_id', grupoIdActivo)
           .order('periodo_resumen', { ascending: false }),
-        supabase.from('cuotas_tarjeta').select('cuenta_tarjeta_id, periodo_pago_estimado').neq('estado', 'cancelada'),
-        supabase.from('gastos').select('id,cuenta_tarjeta_id,fecha_gasto,estado_registro').not('cuenta_tarjeta_id', 'is', null).neq('estado_registro', 'anulado'),
-        supabase.from('cuotas_tarjeta').select('id,gasto_id,estado').neq('estado', 'cancelada'),
+        supabase.from('cuotas_tarjeta').select('cuenta_tarjeta_id, periodo_pago_estimado').eq('grupo_id', grupoIdActivo).neq('estado', 'cancelada'),
+        supabase.from('gastos').select('id,cuenta_tarjeta_id,fecha_gasto,estado_registro').eq('grupo_id', grupoIdActivo).not('cuenta_tarjeta_id', 'is', null).neq('estado_registro', 'anulado'),
+        supabase.from('cuotas_tarjeta').select('id,gasto_id,estado').eq('grupo_id', grupoIdActivo).neq('estado', 'cancelada'),
       ]);
 
     if (errorCuentas || errorCalendarios || errorCuotas || errorGastos || errorCuotasPorGasto) {
+      const primerError = errorCuentas ?? errorCalendarios ?? errorCuotas ?? errorGastos ?? errorCuotasPorGasto;
+      const detalle = registrarErrorSpendWise('calendario', primerError);
+      setErrorTecnico(detalle);
       setMensaje({ tipo: 'error', texto: 'No se pudo cargar el calendario de tarjetas.' });
-      setCargando(false);
       return;
     }
 
@@ -207,15 +217,59 @@ export default function Page() {
       return { ...actual, cuenta_tarjeta_id: cuentasCargadas[0]?.id ?? '' };
     });
 
-    setCargando(false);
+    } catch (errorCarga) {
+      const detalle = registrarErrorSpendWise('calendario', errorCarga);
+      setErrorTecnico(detalle);
+      setMensaje({ tipo: 'error', texto: 'No se pudo cargar el calendario de tarjetas.' });
+    } finally {
+      setCargando(false);
+    }
   }
 
   useEffect(() => {
-    void cargarDatos();
+    let cancelado = false;
+
+    async function cargarPerfil() {
+      setPerfilCargando(true);
+      setErrorTecnico(null);
+
+      try {
+        const perfil = await obtenerPerfilActivo();
+        if (cancelado) return;
+        setGrupoId(perfil.grupo_id);
+        setUsuarioEmail(perfil.email);
+      } catch (errorPerfil) {
+        if (cancelado) return;
+        const detalle = registrarErrorSpendWise('calendario', errorPerfil);
+        setGrupoId(null);
+        setErrorTecnico(detalle);
+        setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
+      } finally {
+        if (!cancelado) setPerfilCargando(false);
+      }
+    }
+
+    void cargarPerfil();
+
+    return () => {
+      cancelado = true;
+    };
   }, []);
 
   useEffect(() => {
-    if (!cuentaSeleccionadaId) return;
+    if (perfilCargando) return;
+
+    if (!grupoId) {
+      setCargando(false);
+      setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
+      return;
+    }
+
+    void cargarDatos(grupoId);
+  }, [perfilCargando, grupoId]);
+
+  useEffect(() => {
+    if (!grupoId || !cuentaSeleccionadaId) return;
     void resolverDuplicadosCuenta(cuentaSeleccionadaId, false);
   }, [cuentaSeleccionadaId]);
 
@@ -260,6 +314,8 @@ export default function Page() {
     setErrorFormulario('');
     setMensaje(null);
 
+    if (!grupoId) return setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
+
     const error = validarFormulario();
     if (error) return setErrorFormulario(error);
 
@@ -298,7 +354,7 @@ export default function Page() {
     const payload = calendarioEditandoId ? payloadBase : { ...payloadBase, origen_fecha: 'manual' as OrigenFecha };
 
     const respuesta = calendarioEditandoId
-      ? await supabase.from('calendario_tarjetas').update(payload).eq('id', calendarioEditandoId)
+      ? await supabase.from('calendario_tarjetas').update(payload).eq('id', calendarioEditandoId).eq('grupo_id', grupoId)
       : await supabase.from('calendario_tarjetas').insert({ ...payload, grupo_id: grupoId });
 
     if (respuesta.error) {
@@ -313,13 +369,14 @@ export default function Page() {
     });
     setGuardando(false);
     limpiarFormulario();
-    await cargarDatos();
+    if (grupoId) await cargarDatos(grupoId);
   }
 
   async function generarMesesFuturos() {
     setErrorGeneracion('');
     setMensaje(null);
 
+    if (!grupoId) return setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
     if (!cuentaSeleccionadaId) return setErrorGeneracion('Primero seleccioná una cuenta de tarjeta.');
     if (!formGeneracion.mes_inicial || !formatoPeriodoValido(formGeneracion.mes_inicial)) {
       return setErrorGeneracion('El mes inicial debe tener formato YYYY-MM.');
@@ -354,7 +411,7 @@ export default function Page() {
         continue;
       }
 
-      const resultado = await obtenerOCrearCalendarioEstimado({ supabase, cuenta, periodo, contexto: 'calendario' });
+      const resultado = await obtenerOCrearCalendarioEstimado({ supabase, cuenta, periodo, contexto: 'calendario', grupoId });
       if (resultado.generado) generados += 1;
       else omitidos += 1;
     }
@@ -365,7 +422,7 @@ export default function Page() {
       texto: `Se generaron ${generados} períodos. Se omitieron ${omitidos} períodos porque ya existían.`,
     });
     setGenerando(false);
-    await cargarDatos();
+    if (grupoId) await cargarDatos(grupoId);
   }
 
   function clavePeriodo(cuentaTarjetaId: string, periodoResumen: string) {
@@ -407,6 +464,8 @@ export default function Page() {
 
   async function eliminarCalendario(item: CalendarioTarjeta) {
     setMensaje(null);
+    if (!grupoId) return setMensaje({ tipo: 'error', texto: 'No se pudo cargar el grupo activo.' });
+
     const confirmacion = window.confirm('¿Querés eliminar este período de calendario?');
     if (!confirmacion) return;
 
@@ -440,7 +499,7 @@ export default function Page() {
       }
     }
 
-    const { error } = await supabase.from('calendario_tarjetas').delete().eq('id', item.id);
+    const { error } = await supabase.from('calendario_tarjetas').delete().eq('id', item.id).eq('grupo_id', grupoId);
     if (error) {
       setMensaje({ tipo: 'error', texto: 'No se pudo eliminar el período de calendario.' });
       return;
@@ -448,7 +507,7 @@ export default function Page() {
 
     if (calendarioEditandoId === item.id) limpiarFormulario();
     setMensaje({ tipo: 'ok', texto: 'Período eliminado correctamente.' });
-    await cargarDatos();
+    if (grupoId) await cargarDatos(grupoId);
   }
 
   async function resolverDuplicadosCuenta(cuentaId: string, mostrarMensaje: boolean) {
@@ -463,11 +522,11 @@ export default function Page() {
     let pendientes = 0;
     for (const duplicados of grupos.values()) {
       if (duplicados.length < 2) continue;
-      const resultado = await consolidarDuplicadosCalendario(supabase, duplicados);
+      const resultado = await consolidarDuplicadosCalendario(supabase, duplicados, grupoId);
       eliminados += resultado.eliminados;
       if (resultado.pendiente) pendientes += 1;
     }
-    if (eliminados > 0 || pendientes > 0) await cargarDatos();
+    if (eliminados > 0 || pendientes > 0) if (grupoId) await cargarDatos(grupoId);
     if (mostrarMensaje && eliminados > 0) setMensaje({ tipo: 'ok', texto: 'Duplicados resueltos. Se conservó un calendario principal para cada período.' });
     if (!mostrarMensaje && eliminados > 0) setMensaje({ tipo: 'ok', texto: 'Se corrigieron períodos duplicados automáticamente.' });
   }
@@ -494,6 +553,9 @@ export default function Page() {
           </ul>
         </div>
       </header>
+
+      {perfilCargando ? <p className="text-sm text-slate-500">Cargando grupo...</p> : null}
+      <ErrorTecnicoDesarrollo error={errorTecnico} />
 
       {mensaje && (
         <div
