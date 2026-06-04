@@ -4,6 +4,8 @@ import { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, useEffect, useMemo, 
 import { supabase } from '@/lib/supabase/client';
 import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
 import { BUCKET_COMPROBANTES, MENSAJE_ERROR_BUCKET_COMPROBANTES, crearRutaStorageComprobante, pathComprobantePerteneceAGrupo, validarComprobante } from '@/lib/comprobantes';
+import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
+import { normalizarErrorTecnico, type ErrorTecnico } from '@/lib/errores';
 import {
   calcularPeriodoResumenYVencimiento,
   calcularPeriodoTarjeta,
@@ -131,6 +133,7 @@ export default function Page() {
   const [filtros, setFiltros] = useState<Filtros>(FILTROS_INICIALES);
   const [gastoEditando, setGastoEditando] = useState<Gasto | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorTecnico, setErrorTecnico] = useState<ErrorTecnico | null>(null);
   const [mensajeExito, setMensajeExito] = useState<string | null>(null);
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([]);
   const [comprobanteNuevo, setComprobanteNuevo] = useState<File | null>(null);
@@ -221,7 +224,8 @@ export default function Page() {
 
   async function cargarDatos() {
     if (!grupoId) return;
-    const [g, c, m, p, ct, tf, cuotasRes, cal, comp] = await Promise.all([
+    setErrorTecnico(null);
+    const [g, c, m, p, ct, tf, cuotasRes, cal] = await Promise.all([
       supabase.from('gastos').select('id,fecha_gasto,establecimiento,descripcion,observaciones,categoria_id,monto,moneda,medio_pago_id,persona_id,cuenta_tarjeta_id,tarjeta_fisica_id,cantidad_cuotas,estado_registro,creado_en').eq('grupo_id', grupoId).order('fecha_gasto', { ascending: false }),
       supabase.from('categorias').select('id,nombre').eq('grupo_id', grupoId).order('nombre'),
       supabase.from('medios_pago').select('id,nombre,tipo').eq('grupo_id', grupoId).order('nombre'),
@@ -230,12 +234,45 @@ export default function Page() {
       supabase.from('tarjetas_fisicas').select('id,cuenta_tarjeta_id,persona_id,tipo,nombre_en_tarjeta,alias,ultimos_4_digitos,activo').eq('grupo_id', grupoId).order('id'),
       supabase.from('cuotas_tarjeta').select('id,gasto_id,numero_cuota,total_cuotas,periodo_pago_estimado,monto_cuota,estado,origen_cuota,persona_id,tarjeta_fisica_id,cuenta_tarjeta_id,observaciones,motivo_modificacion').eq('grupo_id', grupoId),
       supabase.from('calendario_tarjetas').select('id,cuenta_tarjeta_id,periodo_resumen,fecha_cierre,fecha_vencimiento,estado_calendario,origen_fecha,observaciones').eq('grupo_id', grupoId),
-      supabase.from('comprobantes').select('id,gasto_id,nombre_archivo,tipo_archivo,mime_type,ruta_storage,storage_path,url_storage,proveedor_almacenamiento,url_drive,estado_archivo,creado_en').eq('grupo_id', grupoId).eq('estado_archivo', 'activo').order('creado_en', { ascending: false })
     ]);
-    if (g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error || cal.error || comp.error) return setError('No se pudieron cargar los datos de gastos.');
-    if (process.env.NODE_ENV !== 'production') console.debug('[SpendWise][gastos] registros cargados', { email: usuarioEmail, grupo_id: grupoId, gastos: g.data?.length ?? 0, cuotas: cuotasRes.data?.length ?? 0, comprobantes: comp.data?.length ?? 0 });
-    setGastos((g.data ?? []) as Gasto[]); setCategorias((c.data ?? []) as OpcionBase[]); setMediosPago((m.data ?? []) as OpcionBase[]); setPersonas((p.data ?? []) as Persona[]); setCuentasTarjeta((ct.data ?? []) as CuentaTarjeta[]); setTarjetasFisicas((tf.data ?? []) as TarjetaFisica[]); setCuotas((cuotasRes.data ?? []) as CuotaTarjeta[]); setCalendarios((cal.data ?? []) as CalendarioTarjeta[]); setComprobantes((comp.data ?? []) as Comprobante[]);
+    const errorPrincipal = g.error || c.error || m.error || p.error || ct.error || tf.error || cuotasRes.error || cal.error;
+    if (errorPrincipal) {
+      console.error('Error cargando historial de gastos', {
+        message: errorPrincipal?.message,
+        code: errorPrincipal?.code,
+        details: errorPrincipal?.details,
+        hint: errorPrincipal?.hint,
+        raw: errorPrincipal,
+      });
+      setErrorTecnico(normalizarErrorTecnico(errorPrincipal));
+      return setError('No se pudieron cargar los datos de gastos.');
+    }
+
+    const comp = await supabase
+      .from('comprobantes')
+      .select('id,gasto_id,nombre_archivo,tipo_archivo,mime_type,ruta_storage,storage_path,url_storage,proveedor_almacenamiento,url_drive,estado_archivo,creado_en')
+      .eq('grupo_id', grupoId)
+      .eq('estado_archivo', 'activo')
+      .order('creado_en', { ascending: false });
+
+    if (comp.error) {
+      console.error('Error cargando historial de gastos', {
+        message: comp.error?.message,
+        code: comp.error?.code,
+        details: comp.error?.details,
+        hint: comp.error?.hint,
+        raw: comp.error,
+      });
+      setErrorTecnico(normalizarErrorTecnico(comp.error));
+      setComprobantes([]);
+    } else {
+      setComprobantes((comp.data ?? []) as Comprobante[]);
+    }
+
+    if (process.env.NODE_ENV !== 'production') console.debug('[SpendWise][gastos] registros cargados', { email: usuarioEmail, grupo_id: grupoId, gastos: g.data?.length ?? 0, cuotas: cuotasRes.data?.length ?? 0, comprobantes: comp.error ? 'no disponibles' : comp.data?.length ?? 0 });
+    setGastos((g.data ?? []) as Gasto[]); setCategorias((c.data ?? []) as OpcionBase[]); setMediosPago((m.data ?? []) as OpcionBase[]); setPersonas((p.data ?? []) as Persona[]); setCuentasTarjeta((ct.data ?? []) as CuentaTarjeta[]); setTarjetasFisicas((tf.data ?? []) as TarjetaFisica[]); setCuotas((cuotasRes.data ?? []) as CuotaTarjeta[]); setCalendarios((cal.data ?? []) as CalendarioTarjeta[]);
   }
+
 
 
   async function asegurarCalendarioConversion(cuenta: CuentaTarjeta, periodo: string) {
@@ -436,24 +473,28 @@ export default function Page() {
         console.error(errorStorage);
         return setError(MENSAJE_ERROR_BUCKET_COMPROBANTES);
       }
-      const { error } = await supabase.from('comprobantes').insert({
+      const payload = {
         gasto_id: gastoId,
-        tipo_comprobante: archivo.type === 'application/pdf' ? 'factura_pdf' : 'ticket_imagen',
+        grupo_id: grupoActualId,
+        nombre_archivo: archivo.name,
         tipo_archivo: archivo.type,
         mime_type: archivo.type,
-        nombre_archivo: archivo.name,
-        ruta_storage: rutaStorage,
         storage_path: rutaStorage,
-        url_storage: null,
-        proveedor_almacenamiento: 'supabase',
-        estado_archivo: 'activo',
-        grupo_id: grupoActualId,
-        tamano_bytes: archivo.size,
-      });
+        tamaño_bytes: archivo.size,
+      };
+      const { error } = await supabase.from('comprobantes').insert(payload);
       if (error) {
-        const { error: errorEliminar } = await supabase.storage.from(BUCKET_COMPROBANTES).remove([rutaStorage]);
-        if (errorEliminar) console.warn('No se pudo eliminar el comprobante subido sin metadata.', errorEliminar);
-        throw error;
+        console.error('Error asociando comprobante', {
+          message: error?.message,
+          code: error?.code,
+          details: error?.details,
+          hint: error?.hint,
+          payload,
+          raw: error,
+        });
+        setErrorTecnico({ ...normalizarErrorTecnico(error), raw: { error, payload } });
+        console.warn('El archivo ya fue subido a Storage pero falló el insert de metadata.', { bucket: BUCKET_COMPROBANTES, storage_path: rutaStorage });
+        return setError('No se pudo asociar el comprobante al gasto. Revisá el detalle técnico en desarrollo.');
       }
       setMensajeExito('Comprobante agregado correctamente.');
       setComprobanteNuevo(null);
@@ -530,6 +571,7 @@ export default function Page() {
     <h1 className="text-2xl font-semibold">Historial de gastos {filtros.estado_registro === 'anulados' ? <span className="ml-2 rounded-full bg-rose-100 px-2 py-1 text-xs text-rose-700">Vista Anulados</span> : null}</h1>
     {mensajeExito && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{mensajeExito}</p>}
     {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+    <ErrorTecnicoDesarrollo error={errorTecnico} />
 
     <div className="grid grid-cols-1 gap-2 rounded-2xl border bg-white p-3 md:grid-cols-3">
       <input className="rounded-xl border px-3 py-2" placeholder="Buscar" value={filtros.busqueda} onChange={(e) => setFiltros((p) => ({ ...p, busqueda: e.target.value }))} />

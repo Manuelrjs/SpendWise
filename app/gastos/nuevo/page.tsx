@@ -5,6 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
 import { BUCKET_COMPROBANTES, MENSAJE_ERROR_BUCKET_COMPROBANTES, crearRutaStorageComprobante, validarComprobante } from '@/lib/comprobantes';
+import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
+import { normalizarErrorTecnico, type ErrorTecnico } from '@/lib/errores';
 import { DatosComprobanteSugeridos, extraerDatosComprobante } from '@/lib/ia/extraer-comprobante';
 import {
   calcularPeriodoResumenYVencimiento,
@@ -73,6 +75,7 @@ export default function Page() {
   const [tarjetas, setTarjetas] = useState<TarjetaFisica[]>([]);
   const [calendarios, setCalendarios] = useState<CalendarioTarjeta[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [errorTecnico, setErrorTecnico] = useState<ErrorTecnico | null>(null);
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [advertencia, setAdvertencia] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
@@ -340,7 +343,7 @@ export default function Page() {
   async function guardar(event: FormEvent) {
     event.preventDefault();
     if (guardando) return;
-    setError(null); setMensaje(null); setAdvertencia(null);
+    setError(null); setErrorTecnico(null); setMensaje(null); setAdvertencia(null);
     if (!grupoId) return setError('No se pudo cargar el grupo activo.');
     const monto = Number(formulario.monto);
     if (!(monto > 0)) return setError('El monto debe ser mayor a 0.');
@@ -360,6 +363,7 @@ export default function Page() {
       const payload = { ...formulario, monto, establecimiento: formulario.establecimiento.trim(), cuenta_tarjeta_id: esTarjetaCredito ? formulario.cuenta_tarjeta_id : null, tarjeta_fisica_id: esTarjetaCredito ? formulario.tarjeta_fisica_id : null, cantidad_cuotas: esTarjetaCredito ? formulario.cantidad_cuotas : 1 };
       let cuotasPayload: Array<Record<string, unknown>> = [];
       let usaronEstimados = false;
+      let falloAsociacionComprobante = false;
 
       if (esTarjetaCredito) {
         const cuenta = cuentas.find((c) => c.id === formulario.cuenta_tarjeta_id);
@@ -425,26 +429,29 @@ export default function Page() {
         }
         rutaStorageSubida = rutaStorage;
 
-        const { error: errorComprobante } = await supabase.from('comprobantes').insert({
-          grupo_id: grupoId,
+        const payloadComprobante = {
           gasto_id: gasto.id,
-          tipo_comprobante: comprobante.type === 'application/pdf' ? 'factura_pdf' : 'ticket_imagen',
+          grupo_id: grupoId,
+          nombre_archivo: comprobante.name,
           tipo_archivo: comprobante.type,
           mime_type: comprobante.type,
-          nombre_archivo: comprobante.name,
-          ruta_storage: rutaStorage,
           storage_path: rutaStorage,
-          url_storage: null,
-          proveedor_almacenamiento: 'supabase',
-          estado_archivo: 'activo',
-          tamano_bytes: comprobante.size,
-        });
+          tamaño_bytes: comprobante.size,
+        };
+        const { error: errorComprobante } = await supabase.from('comprobantes').insert(payloadComprobante);
         if (errorComprobante) {
-          console.error(errorComprobante);
-          const { error: errorEliminar } = await supabase.storage.from(BUCKET_COMPROBANTES).remove([rutaStorage]);
-          if (errorEliminar) console.warn('No se pudo eliminar el comprobante subido sin metadata.', errorEliminar);
-          rutaStorageSubida = null;
-          throw new Error('Se guardó el gasto pero no se pudo asociar el comprobante.');
+          const detalle = normalizarErrorTecnico(errorComprobante);
+          console.error('Error asociando comprobante', {
+            message: errorComprobante?.message,
+            code: errorComprobante?.code,
+            details: errorComprobante?.details,
+            hint: errorComprobante?.hint,
+            payload: payloadComprobante,
+            raw: errorComprobante,
+          });
+          setErrorTecnico({ ...detalle, raw: { error: errorComprobante, payload: payloadComprobante } });
+          console.warn('El archivo ya fue subido a Storage pero falló el insert de metadata.', { bucket: BUCKET_COMPROBANTES, storage_path: rutaStorage });
+          falloAsociacionComprobante = true;
         }
       }
 
@@ -461,11 +468,16 @@ export default function Page() {
         if (usaronEstimados) setAdvertencia('Se usaron fechas estimadas de cierre/vencimiento. Podés confirmarlas luego desde Calendario.');
       }
 
-      setMensaje('Gasto registrado con éxito.');
+      if (falloAsociacionComprobante) {
+        setError('Se guardó el gasto pero no se pudo asociar el comprobante. Revisá el detalle técnico en desarrollo.');
+      } else {
+        setMensaje('Gasto registrado con éxito.');
+      }
       setFormulario({ ...inicial, fecha_gasto: HOY });
       limpiarComprobanteSeleccionado();
     } catch (e) {
       console.error(e);
+      setErrorTecnico((actual) => actual ?? normalizarErrorTecnico(e));
       if (gastoCreadoId) {
         await supabase
           .from('gastos')
@@ -476,7 +488,7 @@ export default function Page() {
     } finally { setGuardando(false); }
   }
 
-  return <section className="mx-auto max-w-4xl space-y-4"><h1 className="text-2xl font-semibold">Nuevo gasto</h1>{error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</p>}{mensaje && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{mensaje}</p>}{advertencia && <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">{advertencia}</p>}<form onSubmit={guardar} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div><label className="text-sm font-medium">Monto *</label><input value={formulario.monto} onChange={(e) => setFormulario((p) => ({ ...p, monto: e.target.value }))} inputMode="decimal" className="mt-1 w-full rounded-xl border px-4 py-3 text-2xl font-semibold" placeholder="0,00" /></div><div className="grid grid-cols-2 gap-2"><input value={formulario.moneda} onChange={(e) => setFormulario((p) => ({ ...p, moneda: e.target.value }))} className="rounded-xl border px-3 py-2" /><input type="date" value={formulario.fecha_gasto} onChange={(e) => setFormulario((p) => ({ ...p, fecha_gasto: e.target.value }))} className="rounded-xl border px-3 py-2" /></div><div><p className="mb-2 text-sm font-medium">Medio de pago *</p><div className="grid grid-cols-2 gap-2">{medios.map((medio) => <button key={medio.id} type="button" onClick={() => setFormulario((p) => ({ ...p, medio_pago_id: medio.id }))} className={`rounded-xl border px-3 py-2 text-sm ${formulario.medio_pago_id === medio.id ? 'border-emerald-500 bg-emerald-50' : ''}`}>{medio.nombre}</button>)}</div></div>
+  return <section className="mx-auto max-w-4xl space-y-4"><h1 className="text-2xl font-semibold">Nuevo gasto</h1>{error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</p>}<ErrorTecnicoDesarrollo error={errorTecnico} />{mensaje && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{mensaje}</p>}{advertencia && <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">{advertencia}</p>}<form onSubmit={guardar} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div><label className="text-sm font-medium">Monto *</label><input value={formulario.monto} onChange={(e) => setFormulario((p) => ({ ...p, monto: e.target.value }))} inputMode="decimal" className="mt-1 w-full rounded-xl border px-4 py-3 text-2xl font-semibold" placeholder="0,00" /></div><div className="grid grid-cols-2 gap-2"><input value={formulario.moneda} onChange={(e) => setFormulario((p) => ({ ...p, moneda: e.target.value }))} className="rounded-xl border px-3 py-2" /><input type="date" value={formulario.fecha_gasto} onChange={(e) => setFormulario((p) => ({ ...p, fecha_gasto: e.target.value }))} className="rounded-xl border px-3 py-2" /></div><div><p className="mb-2 text-sm font-medium">Medio de pago *</p><div className="grid grid-cols-2 gap-2">{medios.map((medio) => <button key={medio.id} type="button" onClick={() => setFormulario((p) => ({ ...p, medio_pago_id: medio.id }))} className={`rounded-xl border px-3 py-2 text-sm ${formulario.medio_pago_id === medio.id ? 'border-emerald-500 bg-emerald-50' : ''}`}>{medio.nombre}</button>)}</div></div>
 <div><label className="text-sm font-medium">Establecimiento *</label><input value={formulario.establecimiento} onChange={(e) => setFormulario((p) => ({ ...p, establecimiento: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2" /></div>
 <div id="seccion-categorias"><div className="mb-2 flex items-center justify-between gap-2"><p className="text-sm font-medium">Categoría *</p><button type="button" onClick={() => abrirModalCrearCategoria()} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">+ Nueva categoría</button></div><div className="grid grid-cols-2 gap-2">{categorias.map((cat) => <button key={cat.id} type="button" onClick={() => setFormulario((p) => ({ ...p, categoria_id: cat.id }))} className={`rounded-xl border px-3 py-2 text-sm ${formulario.categoria_id === cat.id ? 'border-emerald-500 bg-emerald-50' : ''}`}>{cat.icono ? `${cat.icono} ` : ''}{cat.nombre}</button>)}</div></div>
 {esTarjetaCredito && <><div><p className="mb-2 text-sm font-medium">Cuenta de tarjeta *</p><div className="space-y-2">{cuentas.map((cuenta) => <button key={cuenta.id} type="button" onClick={() => setFormulario((p) => ({ ...p, cuenta_tarjeta_id: cuenta.id, tarjeta_fisica_id: '' }))} className={`w-full rounded-xl border p-3 text-left ${formulario.cuenta_tarjeta_id === cuenta.id ? 'border-emerald-500 bg-emerald-50' : ''}`}><p className="font-medium">{cuenta.nombre_cuenta}</p><p className="text-xs text-slate-500">{cuenta.banco ?? ''} {cuenta.marca ?? ''}</p></button>)}</div></div>

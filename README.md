@@ -336,9 +336,38 @@ La tabla `comprobantes` guarda la metadata del archivo asociado al gasto, incluy
 - `gasto_id`: gasto al que pertenece el archivo.
 - `nombre_archivo`: nombre original visible para el usuario.
 - `tipo_archivo` y `mime_type`: MIME del archivo (`image/jpeg`, `image/png`, `image/webp` o `application/pdf`).
-- `ruta_storage` y `storage_path`: ruta interna dentro del bucket `comprobantes`.
-- `tamano_bytes`: tamaño del archivo cuando el navegador lo informa.
+- `storage_path`: ruta interna exacta dentro del bucket `comprobantes` (sin prefijar nuevamente el nombre del bucket).
+- `ruta_storage`: columna histórica que puede existir en ambientes anteriores para compatibilidad de lectura.
+- `tamaño_bytes`: tamaño del archivo cuando el navegador lo informa.
 - `creado_en`: timestamp generado por la base.
+
+
+### Corrección urgente de metadata de comprobantes
+
+Después de esta corrección, ejecutar en Supabase SQL Editor la migración:
+
+```sql
+supabase/migrations/010_fix_comprobantes_storage_metadata.sql
+```
+
+Esta migración no borra datos. Agrega columnas faltantes en `public.comprobantes`, backfillea metadata posible desde columnas históricas y asegura políticas RLS por `grupo_id` para `SELECT`, `INSERT` y `UPDATE`.
+
+Verificar en Supabase Table Editor que `comprobantes` tenga estas columnas:
+
+- `grupo_id`
+- `storage_path`
+- `mime_type`
+- `nombre_archivo`
+- `tipo_archivo`
+- `tamaño_bytes`
+
+Para comprobantes nuevos, el `storage_path` guardado debe verse así:
+
+```text
+{grupo_id}/{año}/{mes}/{gasto_id}/{archivo}
+```
+
+No debe guardarse como `comprobantes/comprobantes/...` ni incluir dos veces el nombre del bucket.
 
 ### Bucket privado y signed URLs
 
@@ -356,7 +385,7 @@ supabase/migrations/009_storage_comprobantes_por_grupo.sql
 
 La migración:
 
-1. Asegura columnas de metadata compatibles (`grupo_id`, `mime_type`, `storage_path`, `tamano_bytes`).
+1. Asegura columnas de metadata compatibles iniciales (`grupo_id`, `mime_type`, `storage_path`, `tamano_bytes`). La corrección posterior `010_fix_comprobantes_storage_metadata.sql` agrega además `tamaño_bytes`.
 2. Crea o actualiza el bucket `comprobantes` como privado (`public = false`).
 3. Crea políticas sobre `storage.objects` para `SELECT`, `INSERT`, `UPDATE` y `DELETE` limitadas al grupo del usuario.
 
@@ -370,7 +399,7 @@ p.grupo_id::text = (storage.foldername(name))[1]
 
 1. Iniciar sesión con **Usuario 1** y crear/subir un comprobante a un gasto.
 2. Verificar en Storage que el archivo quedó en `comprobantes/{grupo_id_usuario_1}/AAAA/MM/{gasto_id}/...`.
-3. Verificar en la tabla `comprobantes` que `grupo_id` coincide con el grupo del Usuario 1 y que `ruta_storage` / `storage_path` empiezan con ese `grupo_id`.
+3. Verificar en la tabla `comprobantes` que `grupo_id` coincide con el grupo del Usuario 1 y que `storage_path` empieza con ese `grupo_id`.
 4. Abrir historial de gastos y confirmar que el Usuario 1 ve el badge **“Con comprobante · PDF”** o **“Con comprobante · Imagen”** y puede abrir la preview/descarga.
 5. Cerrar sesión e iniciar con **Usuario 2**.
 6. Confirmar que Usuario 2 no ve el comprobante del Usuario 1 en `/gastos`.
