@@ -262,3 +262,36 @@ select count(*) as pendientes_sin_grupo from public.calendario_tarjetas where gr
 Si los conteos dan `0`, el backfill quedó aplicado para esas tablas.
 
 > Importante: este backfill es solo para datos históricos de desarrollo. No debe moverse a `ensureUserProfile` ni ejecutarse en cada login.
+
+## Seguridad por grupo con RLS
+
+Desde la Tarea 30, SpendWise protege las tablas operativas con **Row Level Security (RLS)** en Supabase usando `grupo_id`.
+
+### Cómo funciona
+
+- El frontend mantiene los filtros explícitos por grupo activo, por ejemplo `.eq('grupo_id', perfil.grupo_id)`, para que las pantallas sigan mostrando solo el contexto actual.
+- Supabase también valida en base de datos que el usuario autenticado solo pueda operar filas cuyo `grupo_id` coincida con el `grupo_id` de su registro en `perfiles`.
+- Las políticas permiten `SELECT`, `INSERT` y `UPDATE` únicamente dentro del grupo del usuario.
+- No se habilita `DELETE` general para datos operativos porque la app usa anulación lógica (`estado_registro = 'anulado'`, `estado = 'cancelada'/'anulada'` o `activo = false`, según corresponda).
+- La única excepción es `calendario_tarjetas`, donde se permite `DELETE` solo dentro del grupo del usuario para eliminar períodos sin uso o consolidar duplicados.
+
+### Tablas protegidas
+
+- `personas`
+- `categorias`
+- `medios_pago`
+- `cuentas_tarjeta`
+- `tarjetas_fisicas`
+- `gastos`
+- `cuotas_tarjeta`
+- `calendario_tarjetas`
+- `compras_cuotas_iniciales`
+- `comprobantes`
+
+### Datos con `grupo_id` nulo
+
+Las filas operativas con `grupo_id` nulo no cumplen ninguna política RLS y no serán visibles para usuarios autenticados. Antes de activar esta migración en un ambiente con datos reales, validar y corregir esos casos con un backfill controlado.
+
+### Storage de comprobantes
+
+La tabla `comprobantes` queda protegida por `grupo_id`, pero las políticas de Supabase Storage no se modifican en esta tarea. Queda pendiente una tarea futura para proteger el bucket/rutas de comprobantes por `grupo_id` o por una convención de path que incluya el grupo.
