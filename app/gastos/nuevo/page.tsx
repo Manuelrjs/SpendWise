@@ -4,11 +4,12 @@ import { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, useEffect, useMemo, 
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
-import { MENSAJE_ERROR_BUCKET_COMPROBANTES, normalizarNombreArchivo, validarComprobante } from '@/lib/comprobantes';
+import { BUCKET_COMPROBANTES, MENSAJE_ERROR_BUCKET_COMPROBANTES, crearRutaStorageComprobante, validarComprobante } from '@/lib/comprobantes';
 import { DatosComprobanteSugeridos, extraerDatosComprobante } from '@/lib/ia/extraer-comprobante';
 import {
   calcularPeriodoResumenYVencimiento,
   calcularPeriodoTarjeta,
+  formatearPeriodoDesdeFecha,
   CalendarioTarjeta,
   sumarMesesPeriodo,
 } from '@/utils/tarjetas';
@@ -55,15 +56,6 @@ function crearNombreComprobantePegado() {
   const hh = String(fecha.getHours()).padStart(2, '0');
   const min = String(fecha.getMinutes()).padStart(2, '0');
   return `comprobante-pegado-${yyyy}-${mm}-${dd}-${hh}${min}.png`;
-}
-
-async function obtenerGrupoIdActual() {
-  const { data: authData } = await supabase.auth.getUser();
-  const userId = authData.user?.id;
-  if (!userId) throw new Error('No hay sesión activa.');
-  const { data, error } = await supabase.from('perfiles').select('grupo_id').eq('id', userId).maybeSingle();
-  if (error || !data?.grupo_id) throw new Error('No se pudo cargar tu perfil. Cerrá sesión e intentá nuevamente.');
-  return data.grupo_id as string;
 }
 
 function normalizarNombreCategoria(nombre: string) {
@@ -349,6 +341,7 @@ export default function Page() {
     event.preventDefault();
     if (guardando) return;
     setError(null); setMensaje(null); setAdvertencia(null);
+    if (!grupoId) return setError('No se pudo cargar el grupo activo.');
     const monto = Number(formulario.monto);
     if (!(monto > 0)) return setError('El monto debe ser mayor a 0.');
     if (!formulario.establecimiento.trim()) return setError('El establecimiento es obligatorio.');
@@ -414,40 +407,43 @@ export default function Page() {
       if (eg || !gasto) throw new Error('No se pudo guardar el gasto.');
       gastoCreadoId = gasto.id;
 
-      const familiaId = await obtenerGrupoIdActual();
+      if (!grupoId) throw new Error('No se pudo cargar el grupo activo.');
+      let rutaStorageSubida: string | null = null;
 
       if (comprobante) {
-        const fechaComprobante = formulario.fecha_gasto ? new Date(`${formulario.fecha_gasto}T00:00:00`) : new Date();
-        const anio = String(fechaComprobante.getFullYear());
-        const mes = String(fechaComprobante.getMonth() + 1).padStart(2, '0');
-        const nombreArchivo = normalizarNombreArchivo(comprobante.name);
-        const rutaStorage = `${familiaId}/${anio}/${mes}/${gasto.id}/${nombreArchivo}`;
+        const rutaStorage = crearRutaStorageComprobante({
+          grupoId,
+          gastoId: gasto.id,
+          nombreArchivo: comprobante.name,
+          fechaGasto: formulario.fecha_gasto,
+        });
 
-        const { error: errorStorage } = await supabase.storage.from('comprobantes').upload(rutaStorage, comprobante, { upsert: false, contentType: comprobante.type });
+        const { error: errorStorage } = await supabase.storage.from(BUCKET_COMPROBANTES).upload(rutaStorage, comprobante, { upsert: false, contentType: comprobante.type });
         if (errorStorage) {
           console.error(errorStorage);
           throw new Error(MENSAJE_ERROR_BUCKET_COMPROBANTES);
         }
-
-        const { data: urlFirmada, error: errorUrl } = await supabase.storage.from('comprobantes').createSignedUrl(rutaStorage, 60 * 60 * 24 * 7);
-        if (errorUrl) {
-          console.error(errorUrl);
-        }
+        rutaStorageSubida = rutaStorage;
 
         const { error: errorComprobante } = await supabase.from('comprobantes').insert({
           grupo_id: grupoId,
           gasto_id: gasto.id,
           tipo_comprobante: comprobante.type === 'application/pdf' ? 'factura_pdf' : 'ticket_imagen',
           tipo_archivo: comprobante.type,
+          mime_type: comprobante.type,
           nombre_archivo: comprobante.name,
           ruta_storage: rutaStorage,
-          url_storage: urlFirmada?.signedUrl ?? null,
+          storage_path: rutaStorage,
+          url_storage: null,
           proveedor_almacenamiento: 'supabase',
           estado_archivo: 'activo',
           tamano_bytes: comprobante.size,
         });
         if (errorComprobante) {
           console.error(errorComprobante);
+          const { error: errorEliminar } = await supabase.storage.from(BUCKET_COMPROBANTES).remove([rutaStorage]);
+          if (errorEliminar) console.warn('No se pudo eliminar el comprobante subido sin metadata.', errorEliminar);
+          rutaStorageSubida = null;
           throw new Error('Se guardó el gasto pero no se pudo asociar el comprobante.');
         }
       }
@@ -455,7 +451,13 @@ export default function Page() {
       if (esTarjetaCredito && cuotasPayload.length > 0) {
         const cuotasConGasto = cuotasPayload.map((cuota) => ({ ...cuota, gasto_id: gasto.id }));
         const { error: ec } = await supabase.from('cuotas_tarjeta').insert(cuotasConGasto.map((item) => ({ ...item, grupo_id: grupoId })));
-        if (ec) throw new Error('No se pudo guardar el gasto con tarjeta. No se registró ningún gasto operativo.');
+        if (ec) {
+          if (rutaStorageSubida) {
+            const { error: errorEliminar } = await supabase.storage.from(BUCKET_COMPROBANTES).remove([rutaStorageSubida]);
+            if (errorEliminar) console.warn('No se pudo eliminar el comprobante subido después de fallar el gasto con tarjeta.', errorEliminar);
+          }
+          throw new Error('No se pudo guardar el gasto con tarjeta. No se registró ningún gasto operativo.');
+        }
         if (usaronEstimados) setAdvertencia('Se usaron fechas estimadas de cierre/vencimiento. Podés confirmarlas luego desde Calendario.');
       }
 
