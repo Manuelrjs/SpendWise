@@ -408,16 +408,34 @@ Por ahora, cada usuario puede pertenecer a **un solo grupo**. Si ya tenía un gr
 
 ### Migración de invitaciones
 
-**Después del merge, ejecutar `supabase/migrations/012_invitaciones_grupo.sql` en Supabase SQL Editor.** La migración crea `public.invitaciones_grupo`, sus índices, validaciones, triggers y políticas RLS. Si no se ejecuta en el proyecto Supabase, la API REST responde `404` al intentar crear una invitación. También permite listar perfiles del mismo grupo y evita que un usuario cambie su propio `grupo_id` o rol sin una invitación válida.
+Para una instalación nueva, ejecutar `supabase/migrations/012_invitaciones_grupo.sql` en Supabase SQL Editor. La migración crea `public.invitaciones_grupo`, sus índices, validaciones, triggers y políticas RLS. Si no se ejecuta en el proyecto Supabase, la API REST responde `404` al intentar crear una invitación. También permite listar perfiles del mismo grupo y evita que un usuario cambie su propio `grupo_id` o rol sin una invitación válida.
 
+En ambientes que ya ejecutaron una versión anterior de la migración 012, ejecutar después `supabase/migrations/013_remove_gen_random_bytes_invitaciones.sql`. Esta migración correctiva elimina el `DEFAULT` de `token` y reemplaza el trigger de preparación para conservar el token enviado por la app, sin borrar invitaciones existentes ni desactivar RLS.
+
+El token se genera en el navegador antes del `INSERT` usando 32 bytes de `crypto.getRandomValues`, se convierte a hexadecimal y se envía siempre en el payload. La columna queda definida como `token text not null unique`, sin generación automática en PostgreSQL.
+
+Para confirmar que el default fue eliminado, ejecutar:
+
+```sql
+select
+  column_name,
+  column_default
+from information_schema.columns
+where table_schema = 'public'
+  and table_name = 'invitaciones_grupo'
+  and column_name = 'token';
+```
+
+El valor de `column_default` debe ser `NULL`.
 
 ### Validación manual de invitaciones
 
-1. Ejecutar `supabase/migrations/012_invitaciones_grupo.sql` en Supabase y confirmar que existe `public.invitaciones_grupo`.
-2. Iniciar como **Usuario 1 admin**, crear una invitación para Usuario 2 y comprobar que la petición no responde `404`, se guarda un registro con `estado = 'pendiente'` y aparece un link copiable.
-3. Iniciar como usuario `miembro` y comprobar que no aparece el formulario para invitar y que RLS rechaza un `INSERT` manual.
-4. Forzar un fallo de Supabase durante la creación y comprobar que la consola muestra `message`, `code`, `details`, `hint`, `payload` y `raw`; en desarrollo también debe aparecer **“Ver error técnico”**.
-5. Abrir el link sin sesión y comprobar que ofrece iniciar sesión o crear una cuenta, conservando el token para volver después de autenticar.
-6. Iniciar como **Usuario 2** con el email invitado, aceptar y comprobar que su perfil cambia al grupo de Usuario 1, la invitación queda aceptada y puede ver los datos compartidos.
-7. Abrir el link con un usuario de email diferente y comprobar el mensaje **“Esta invitación pertenece a otro email.”**.
-8. Como admin, cancelar una invitación pendiente y comprobar que el link muestra **“Esta invitación ya no está disponible.”**.
+1. Ejecutar `supabase/migrations/012_invitaciones_grupo.sql` en una instalación nueva o `supabase/migrations/013_remove_gen_random_bytes_invitaciones.sql` si la tabla ya existe. Ejecutar el SQL de diagnóstico y confirmar que `column_default` es `NULL`.
+2. Iniciar como **Usuario 1 admin**, crear una invitación para Usuario 2 y comprobar que no aparece el error `function gen_random_bytes(integer) does not exist`, se guarda un registro con `estado = 'pendiente'`, `email_invitado` y `grupo_id` correctos, y un `token` hexadecimal de 64 caracteres.
+3. Presionar **Copiar link** y confirmar que la URL contiene `?token=` seguido por el token guardado.
+4. Iniciar como usuario `miembro` y comprobar que no aparece el formulario para invitar y que RLS rechaza un `INSERT` manual.
+5. Forzar un fallo de Supabase durante la creación y comprobar que la consola muestra `message`, `code`, `details`, `hint`, `payload` y `raw`; en desarrollo también debe aparecer **“Ver error técnico”**.
+6. Abrir el link sin sesión y comprobar que ofrece iniciar sesión o crear una cuenta, conservando el token para volver después de autenticar.
+7. Iniciar como **Usuario 2** con el email invitado, aceptar y comprobar que su perfil cambia al grupo de Usuario 1, la invitación queda aceptada y puede ver los datos compartidos.
+8. Abrir el link con un usuario de email diferente y comprobar el mensaje **“Esta invitación pertenece a otro email.”**.
+9. Como admin, cancelar una invitación pendiente y comprobar que el link muestra **“Esta invitación ya no está disponible.”**.
