@@ -434,10 +434,13 @@ export default function Page() {
           gasto_id: gasto.id,
           grupo_id: grupoId,
           nombre_archivo: obtenerNombreArchivoDesdeRuta(rutaStorage),
+          tipo_archivo: comprobante.type,
           tipo_comprobante: detectarTipoComprobante(comprobante),
           ruta_storage: rutaStorage,
           url_storage: null,
           tamano_bytes: comprobante.size,
+          proveedor_almacenamiento: 'supabase',
+          estado_archivo: 'activo',
         };
         const { error: errorComprobante } = await supabase.from('comprobantes').insert(payloadComprobante);
         if (errorComprobante) {

@@ -331,23 +331,27 @@ La app usa como estructura estándar las columnas reales en español de `public.
 - `grupo_id`: grupo del perfil activo del usuario.
 - `gasto_id`: gasto asociado.
 - `nombre_archivo`: nombre sanitizado/final del archivo guardado.
-- `tipo_comprobante`: clasificación funcional (`imagen`, `pdf` u `otro`).
+- `tipo_archivo`: MIME type real permitido (`image/jpeg`, `image/png`, `image/webp` o `application/pdf`).
+- `tipo_comprobante`: clasificación funcional opcional (`imagen`, `pdf` u `otro`); no se usa para decidir la vista previa.
 - `ruta_storage`: path interno exacto dentro del bucket `comprobantes`.
 - `url_storage`: URL pública solo si el bucket se configura público; con bucket privado puede quedar `NULL`.
 - `url_drive`: fallback futuro/histórico si un comprobante está archivado externamente.
 - `tamano_bytes`: tamaño informado por el navegador (`file.size`).
+- `proveedor_almacenamiento`: proveedor permitido; para archivos nuevos se guarda `supabase`.
+- `estado_archivo`: estado permitido; para archivos nuevos se guarda `activo`.
+- `creado_en` y `actualizado_en`: timestamps de auditoría.
 
-El código ya no escribe metadata en columnas duplicadas o no estándar como `storage_path`, `mime_type`, `tipo_archivo` o `tamaño_bytes`. Si alguna de esas columnas existe por migraciones anteriores, puede quedar en la base por compatibilidad, pero la app usa la estructura estándar en español.
+El código guarda siempre `file.type` en `tipo_archivo`. Las columnas históricas duplicadas como `storage_path`, `mime_type` o `tamaño_bytes` pueden quedar en la base por compatibilidad, pero la app no escribe en ellas.
 
 ### Corrección de metadata en Supabase
 
 Para alinear ambientes que hayan recibido migraciones anteriores, ejecutar en Supabase SQL Editor:
 
 ```sql
-supabase/migrations/011_comprobantes_metadata_espanol.sql
+supabase/migrations/011_fix_comprobantes_tipo_archivo_mime.sql
 ```
 
-La migración no borra datos ni archivos. Asegura las columnas estándar en español, hace backfill no destructivo desde columnas históricas si existen, relaja `tipo_archivo` si quedó obligatorio en algún ambiente y mantiene RLS por `grupo_id`.
+La migración no borra datos, archivos, columnas ni constraints, y no modifica RLS. Corrige valores nulos o inconsistentes únicamente cuando puede inferir un MIME permitido desde el nombre del archivo o una clasificación histórica conocida.
 
 ### Bucket privado y signed URLs
 
@@ -385,8 +389,8 @@ p.grupo_id::text = (storage.foldername(name))[1]
 
 ### Cómo probar con imagen, PDF y dos usuarios
 
-1. Iniciar sesión con **Usuario 1** y crear un gasto con una imagen. Verificar que el archivo quede bajo `comprobantes/{grupo_id_usuario_1}/AAAA/MM/{gasto_id}/...` y que la fila de `comprobantes` tenga `grupo_id`, `nombre_archivo`, `tipo_comprobante = imagen`, `ruta_storage` y `tamano_bytes`.
-2. Crear otro gasto con un PDF. Verificar `tipo_comprobante = pdf`, `ruta_storage` y `tamano_bytes`.
+1. Iniciar sesión con **Usuario 1** y crear un gasto con una imagen. Verificar que el archivo quede bajo `comprobantes/{grupo_id_usuario_1}/AAAA/MM/{gasto_id}/...` y que la fila de `comprobantes` tenga `grupo_id`, `nombre_archivo`, `tipo_archivo = image/jpeg`, `ruta_storage`, `tamano_bytes`, `proveedor_almacenamiento = supabase` y `estado_archivo = activo`.
+2. Crear otro gasto con un PDF. Verificar `tipo_archivo = application/pdf`, `ruta_storage` y `tamano_bytes`.
 3. Abrir **Historial de gastos** y confirmar que carga aunque existan comprobantes viejos con metadata incompleta. Los comprobantes con ruta deben abrir/descargar; los que no tengan ruta ni URL deben mostrar **“Comprobante no disponible”**.
 4. Cerrar sesión e iniciar con **Usuario 2**. Confirmar que no ve comprobantes del Usuario 1 por las consultas filtradas por `grupo_id` y RLS.
 5. Revisar Storage: los comprobantes nuevos deben quedar bajo carpeta `{grupo_id}/...`; las carpetas antiguas `2026/...` pueden seguir existiendo y no se borran.
