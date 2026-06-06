@@ -3,7 +3,7 @@
 import { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { obtenerPerfilActivo } from '@/lib/auth/grupo-activo';
-import { BUCKET_COMPROBANTES, MENSAJE_ERROR_BUCKET_COMPROBANTES, crearRutaStorageComprobante, detectarTipoComprobante, obtenerNombreArchivoDesdeRuta, validarComprobante, type TipoComprobante } from '@/lib/comprobantes';
+import { BUCKET_COMPROBANTES, MENSAJE_ERROR_BUCKET_COMPROBANTES, crearRutaStorageComprobante, detectarTipoComprobante, esImagenTipoArchivo, esPdfTipoArchivo, obtenerNombreArchivoDesdeRuta, validarComprobante, type TipoComprobante } from '@/lib/comprobantes';
 import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
 import { normalizarErrorTecnico, type ErrorTecnico } from '@/lib/errores';
 import {
@@ -65,6 +65,7 @@ type Comprobante = {
   gasto_id: string;
   grupo_id: string;
   nombre_archivo: string | null;
+  tipo_archivo: string | null;
   tipo_comprobante: TipoComprobante | null;
   ruta_storage: string | null;
   url_storage: string | null;
@@ -249,7 +250,7 @@ export default function Page() {
 
     const comp = await supabase
       .from('comprobantes')
-      .select('id,gasto_id,grupo_id,nombre_archivo,tipo_comprobante,ruta_storage,url_storage,url_drive,tamano_bytes,creado_en,actualizado_en')
+      .select('id,gasto_id,grupo_id,nombre_archivo,tipo_archivo,tipo_comprobante,ruta_storage,url_storage,url_drive,tamano_bytes,creado_en,actualizado_en')
       .eq('grupo_id', grupoId)
       .order('creado_en', { ascending: false });
 
@@ -476,10 +477,13 @@ export default function Page() {
         gasto_id: gastoId,
         grupo_id: grupoActualId,
         nombre_archivo: obtenerNombreArchivoDesdeRuta(rutaStorage),
+        tipo_archivo: archivo.type,
         tipo_comprobante: detectarTipoComprobante(archivo),
         ruta_storage: rutaStorage,
         url_storage: null,
         tamano_bytes: archivo.size,
+        proveedor_almacenamiento: 'supabase',
+        estado_archivo: 'activo',
       };
       const { error } = await supabase.from('comprobantes').insert(payload);
       if (error) {
@@ -526,19 +530,11 @@ export default function Page() {
     return Boolean(comprobante.ruta_storage || comprobante.url_storage || comprobante.url_drive);
   }
 
-  function esImagen(tipoComprobante: TipoComprobante | null) {
-    return tipoComprobante === 'imagen';
-  }
-
-  function esPdf(tipoComprobante: TipoComprobante | null) {
-    return tipoComprobante === 'pdf';
-  }
-
   function etiquetaComprobanteGasto(gastoId: string) {
     const comprobantesDelGasto = comprobantes.filter((comprobante) => comprobante.gasto_id === gastoId);
     if (comprobantesDelGasto.length > 0 && comprobantesDelGasto.every((comprobante) => !comprobanteDisponible(comprobante))) return 'Comprobante no disponible';
-    if (comprobantesDelGasto.some((comprobante) => esPdf(comprobante.tipo_comprobante))) return 'Con comprobante · PDF';
-    if (comprobantesDelGasto.some((comprobante) => esImagen(comprobante.tipo_comprobante))) return 'Con comprobante · Imagen';
+    if (comprobantesDelGasto.some((comprobante) => esPdfTipoArchivo(comprobante.tipo_archivo))) return 'Con comprobante · PDF';
+    if (comprobantesDelGasto.some((comprobante) => esImagenTipoArchivo(comprobante.tipo_archivo))) return 'Con comprobante · Imagen';
     return 'Con comprobante';
   }
 
@@ -612,8 +608,8 @@ export default function Page() {
           {comprobantesGastoPreview.length > 1 ? <div className="flex flex-wrap gap-2">{comprobantesGastoPreview.map((item, index) => <button type="button" key={item.id} onClick={() => setIndicePreview(index)} className={`rounded-lg px-2 py-1 text-xs ${index === indicePreview ? 'bg-emerald-600 text-white' : 'border bg-slate-50 text-slate-700'}`}>#{index + 1}</button>)}</div> : null}
           <div className="max-h-[60vh] overflow-auto rounded-xl border bg-slate-50 p-2">
             {urlComprobantePreview ? (
-              esImagen(comprobantePreview.tipo_comprobante) ? <img src={urlComprobantePreview} alt={comprobantePreview.nombre_archivo ?? 'Comprobante'} className="mx-auto h-auto max-h-[55vh] w-auto rounded-lg object-contain" /> : (
-                esPdf(comprobantePreview.tipo_comprobante) ? <iframe title={comprobantePreview.nombre_archivo ?? 'Comprobante PDF'} src={urlComprobantePreview} className="h-[55vh] w-full rounded-lg" /> : <p className="p-4 text-sm text-slate-600">Formato no compatible para vista previa.</p>
+              esImagenTipoArchivo(comprobantePreview.tipo_archivo) ? <img src={urlComprobantePreview} alt={comprobantePreview.nombre_archivo ?? 'Comprobante'} className="mx-auto h-auto max-h-[55vh] w-auto rounded-lg object-contain" /> : (
+                esPdfTipoArchivo(comprobantePreview.tipo_archivo) ? <iframe title={comprobantePreview.nombre_archivo ?? 'Comprobante PDF'} src={urlComprobantePreview} className="h-[55vh] w-full rounded-lg" /> : <p className="p-4 text-sm text-slate-600">Formato no compatible para vista previa.</p>
               )
             ) : <p className="p-4 text-sm text-rose-700">{errorAccesoComprobante ?? 'No se pudo acceder al comprobante.'}</p>}
           </div>
@@ -647,7 +643,7 @@ export default function Page() {
       {gastoEditandoTieneCuotas ? <p className="text-xs text-slate-500">Medio de pago, fecha y monto están bloqueados para mantener consistencia con cuotas generadas.</p> : null}
       <button className="rounded-xl bg-emerald-600 px-3 py-2 text-white">Guardar cambios</button>
 
-      <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Comprobante</h3><p className="text-xs text-slate-600">Opcional: adjuntá una foto, imagen o PDF del ticket/factura.</p><p className="text-xs text-slate-500">También podés pegar una imagen copiada desde WhatsApp.</p><div tabIndex={0} onPaste={manejarPegadoComprobante} onDragOver={(event) => { event.preventDefault(); setArrastrandoComprobante(true); }} onDragLeave={() => setArrastrandoComprobante(false)} onDrop={manejarDropComprobante} className={`rounded-xl border border-dashed p-3 ${arrastrandoComprobante ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 bg-slate-50'}`}><p className="text-xs text-slate-600">Arrastrá una imagen/PDF acá o pegá una imagen copiada.</p><div className="mt-2 grid gap-2 sm:grid-cols-3"><button type="button" onClick={() => inputCamaraRef.current?.click()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Tomar foto del comprobante</button><button type="button" onClick={() => inputSubirRef.current?.click()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Subir imagen o PDF</button><button type="button" onClick={() => void pegarComprobanteDesdeBoton()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Pegar imagen copiada</button></div><input ref={inputCamaraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={manejarCambioArchivo} /><input ref={inputSubirRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={manejarCambioArchivo} /></div>{mensajeComprobante ? <p className="text-xs text-slate-500">{mensajeComprobante}</p> : null}{comprobanteNuevo ? <div className="rounded-lg border p-2 text-xs"><p className="truncate"><strong>Archivo:</strong> {comprobanteNuevo.name}</p><p><strong>Tipo:</strong> {comprobanteNuevo.type || 'Sin tipo'}</p><p><strong>Tamaño:</strong> {formatearTamanoArchivo(comprobanteNuevo.size)}</p><div className="mt-2 flex gap-2"><button type="button" onClick={() => void agregarComprobanteAGasto(gastoEditando.id, comprobanteNuevo)} className="rounded bg-emerald-600 px-2 py-1 text-white">Adjuntar comprobante</button><button type="button" onClick={() => setComprobanteNuevo(null)} className="rounded border px-2 py-1">Quitar comprobante</button></div></div> : <p className="text-xs text-slate-500">Sin comprobante seleccionado.</p>}{comprobantesGastoEditando.length === 0 ? <p className="text-xs text-slate-500">Sin comprobantes asociados.</p> : comprobantesGastoEditando.map((comprobante) => <div key={comprobante.id} className="rounded-lg border p-2 text-xs"><p className="font-medium">{comprobante.nombre_archivo ?? 'Archivo sin nombre'}</p><p className="text-slate-500">{comprobante.tipo_comprobante ?? 'tipo sin informar'}</p>{!comprobanteDisponible(comprobante) ? <p className="text-amber-700">Comprobante no disponible</p> : null}<button type="button" onClick={() => { setGastoPreviewId(comprobante.gasto_id); setIndicePreview(Math.max(0, comprobantesGastoEditando.findIndex((item) => item.id === comprobante.id))); setComprobantePreviewAbierto(true); }} className="text-emerald-700 underline">Abrir / descargar</button></div>)}</div>
+      <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Comprobante</h3><p className="text-xs text-slate-600">Opcional: adjuntá una foto, imagen o PDF del ticket/factura.</p><p className="text-xs text-slate-500">También podés pegar una imagen copiada desde WhatsApp.</p><div tabIndex={0} onPaste={manejarPegadoComprobante} onDragOver={(event) => { event.preventDefault(); setArrastrandoComprobante(true); }} onDragLeave={() => setArrastrandoComprobante(false)} onDrop={manejarDropComprobante} className={`rounded-xl border border-dashed p-3 ${arrastrandoComprobante ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 bg-slate-50'}`}><p className="text-xs text-slate-600">Arrastrá una imagen/PDF acá o pegá una imagen copiada.</p><div className="mt-2 grid gap-2 sm:grid-cols-3"><button type="button" onClick={() => inputCamaraRef.current?.click()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Tomar foto del comprobante</button><button type="button" onClick={() => inputSubirRef.current?.click()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Subir imagen o PDF</button><button type="button" onClick={() => void pegarComprobanteDesdeBoton()} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium">Pegar imagen copiada</button></div><input ref={inputCamaraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={manejarCambioArchivo} /><input ref={inputSubirRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={manejarCambioArchivo} /></div>{mensajeComprobante ? <p className="text-xs text-slate-500">{mensajeComprobante}</p> : null}{comprobanteNuevo ? <div className="rounded-lg border p-2 text-xs"><p className="truncate"><strong>Archivo:</strong> {comprobanteNuevo.name}</p><p><strong>Tipo:</strong> {comprobanteNuevo.type || 'Sin tipo'}</p><p><strong>Tamaño:</strong> {formatearTamanoArchivo(comprobanteNuevo.size)}</p><div className="mt-2 flex gap-2"><button type="button" onClick={() => void agregarComprobanteAGasto(gastoEditando.id, comprobanteNuevo)} className="rounded bg-emerald-600 px-2 py-1 text-white">Adjuntar comprobante</button><button type="button" onClick={() => setComprobanteNuevo(null)} className="rounded border px-2 py-1">Quitar comprobante</button></div></div> : <p className="text-xs text-slate-500">Sin comprobante seleccionado.</p>}{comprobantesGastoEditando.length === 0 ? <p className="text-xs text-slate-500">Sin comprobantes asociados.</p> : comprobantesGastoEditando.map((comprobante) => <div key={comprobante.id} className="rounded-lg border p-2 text-xs"><p className="font-medium">{comprobante.nombre_archivo ?? 'Archivo sin nombre'}</p><p className="text-slate-500">{comprobante.tipo_archivo ?? 'tipo MIME sin informar'}</p>{!comprobanteDisponible(comprobante) ? <p className="text-amber-700">Comprobante no disponible</p> : null}<button type="button" onClick={() => { setGastoPreviewId(comprobante.gasto_id); setIndicePreview(Math.max(0, comprobantesGastoEditando.findIndex((item) => item.id === comprobante.id))); setComprobantePreviewAbierto(true); }} className="text-emerald-700 underline">Abrir / descargar</button></div>)}</div>
 
       <div className="space-y-2 border-t pt-3"><h3 className="font-medium">Cuotas asociadas</h3>
         {cuotasGastoEditando.map((cuota) => <div key={cuota.id} className="rounded-xl border p-2 text-sm">

@@ -1,7 +1,8 @@
 export const BUCKET_COMPROBANTES = 'comprobantes';
 export const TAMANO_MAXIMO_COMPROBANTE_BYTES = 10 * 1024 * 1024;
 export const MENSAJE_ERROR_BUCKET_COMPROBANTES = 'No se pudo subir el comprobante. Verificá que el bucket comprobantes exista en Supabase Storage.';
-const TIPOS_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+export const TIPOS_ARCHIVO_COMPROBANTE_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] as const;
+export type TipoArchivoComprobante = (typeof TIPOS_ARCHIVO_COMPROBANTE_PERMITIDOS)[number];
 
 type CrearRutaStorageParams = {
   grupoId: string;
@@ -12,8 +13,7 @@ type CrearRutaStorageParams = {
 };
 
 export function validarComprobante(archivo: File) {
-  const tipoComprobante = detectarTipoComprobante(archivo);
-  const tipoPermitido = TIPOS_PERMITIDOS.includes(archivo.type) || tipoComprobante === 'pdf';
+  const tipoPermitido = TIPOS_ARCHIVO_COMPROBANTE_PERMITIDOS.includes(archivo.type as TipoArchivoComprobante);
   if (!tipoPermitido) {
     return { valido: false, mensaje: 'El comprobante debe ser imagen o PDF.' };
   }
@@ -24,6 +24,14 @@ export function validarComprobante(archivo: File) {
 }
 
 export type TipoComprobante = 'imagen' | 'pdf' | 'otro';
+
+export function esImagenTipoArchivo(tipoArchivo: string | null | undefined) {
+  return tipoArchivo?.toLowerCase().startsWith('image/') ?? false;
+}
+
+export function esPdfTipoArchivo(tipoArchivo: string | null | undefined) {
+  return tipoArchivo?.toLowerCase() === 'application/pdf';
+}
 
 export function detectarTipoComprobante(archivo: Pick<File, 'type' | 'name'>): TipoComprobante {
   const tipo = archivo.type.toLowerCase();
