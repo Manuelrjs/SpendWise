@@ -58,7 +58,7 @@ create table if not exists public.invitaciones_grupo (
   email_invitado text not null,
   rol text not null default 'miembro' check (rol in ('admin', 'miembro')),
   estado text not null default 'pendiente' check (estado in ('pendiente', 'aceptada', 'cancelada', 'expirada')),
-  token text not null unique default encode(gen_random_bytes(32), 'hex'),
+  token text not null unique,
   invitado_por uuid references auth.users(id),
   aceptado_por uuid references auth.users(id),
   creado_en timestamptz not null default now(),
@@ -82,7 +82,10 @@ set search_path = public
 as $$
 begin
   new.email_invitado := lower(trim(new.email_invitado));
-  new.token := encode(gen_random_bytes(32), 'hex');
+  -- El token se genera en la app antes del insert; la base solo valida y conserva el valor recibido.
+  if new.token is null or length(new.token) < 32 then
+    raise exception 'La invitación requiere un token seguro generado por la aplicación.';
+  end if;
   new.invitado_por := auth.uid();
   return new;
 end;
