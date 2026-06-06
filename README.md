@@ -408,14 +408,16 @@ Por ahora, cada usuario puede pertenecer a **un solo grupo**. Si ya tenía un gr
 
 ### Migración de invitaciones
 
-Ejecutar `supabase/migrations/012_invitaciones_grupo.sql` en Supabase SQL Editor. La migración crea `invitaciones_grupo`, sus índices, validaciones, triggers y políticas RLS. También permite listar perfiles del mismo grupo y evita que un usuario cambie su propio `grupo_id` o rol sin una invitación válida.
+**Después del merge, ejecutar `supabase/migrations/012_invitaciones_grupo.sql` en Supabase SQL Editor.** La migración crea `public.invitaciones_grupo`, sus índices, validaciones, triggers y políticas RLS. Si no se ejecuta en el proyecto Supabase, la API REST responde `404` al intentar crear una invitación. También permite listar perfiles del mismo grupo y evita que un usuario cambie su propio `grupo_id` o rol sin una invitación válida.
 
 
 ### Validación manual de invitaciones
 
-1. Iniciar como **Usuario 1 admin**, crear una invitación para Usuario 2 y comprobar que aparece pendiente con un link copiable.
-2. Abrir el link sin sesión y comprobar que ofrece iniciar sesión o crear una cuenta, conservando el token para volver después de autenticar.
-3. Iniciar como **Usuario 2** con el email invitado, aceptar y comprobar que su perfil cambia al grupo de Usuario 1, la invitación queda aceptada y puede ver los datos compartidos.
-4. Abrir el link con un usuario de email diferente y comprobar el mensaje **“Esta invitación pertenece a otro email.”**.
-5. Iniciar como usuario `miembro` y comprobar que no aparece el formulario para invitar y que RLS rechaza un `INSERT` manual.
-6. Como admin, cancelar una invitación pendiente y comprobar que el link muestra **“Esta invitación ya no está disponible.”**.
+1. Ejecutar `supabase/migrations/012_invitaciones_grupo.sql` en Supabase y confirmar que existe `public.invitaciones_grupo`.
+2. Iniciar como **Usuario 1 admin**, crear una invitación para Usuario 2 y comprobar que la petición no responde `404`, se guarda un registro con `estado = 'pendiente'` y aparece un link copiable.
+3. Iniciar como usuario `miembro` y comprobar que no aparece el formulario para invitar y que RLS rechaza un `INSERT` manual.
+4. Forzar un fallo de Supabase durante la creación y comprobar que la consola muestra `message`, `code`, `details`, `hint`, `payload` y `raw`; en desarrollo también debe aparecer **“Ver error técnico”**.
+5. Abrir el link sin sesión y comprobar que ofrece iniciar sesión o crear una cuenta, conservando el token para volver después de autenticar.
+6. Iniciar como **Usuario 2** con el email invitado, aceptar y comprobar que su perfil cambia al grupo de Usuario 1, la invitación queda aceptada y puede ver los datos compartidos.
+7. Abrir el link con un usuario de email diferente y comprobar el mensaje **“Esta invitación pertenece a otro email.”**.
+8. Como admin, cancelar una invitación pendiente y comprobar que el link muestra **“Esta invitación ya no está disponible.”**.
