@@ -13,6 +13,7 @@ import {
   type PerfilActivo,
 } from '@/lib/auth/grupo-activo';
 import { AuthSpendWiseProvider } from '@/components/auth-context';
+import { SelectorGrupoActivo } from '@/components/selector-grupo-activo';
 import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
 import { registrarErrorSpendWise, type ErrorTecnico } from '@/lib/errores';
 
@@ -272,8 +273,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
           </div>
         ) : null}
         {perfil?.email && !esRutaPublica ? (
-          <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600">
-            Grupo activo: {perfil.grupo_nombre ?? 'Grupo activo'} · Sesión: {perfil.email}
+          <div className="mb-3 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+            <p>Grupo activo: <strong>{perfil.grupo_nombre ?? 'Grupo activo'}</strong> · Sesión: {perfil.email}</p>
+            <div className="w-full sm:w-64"><SelectorGrupoActivo /></div>
           </div>
         ) : null}
         {children}
