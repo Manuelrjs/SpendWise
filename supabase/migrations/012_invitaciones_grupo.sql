@@ -69,6 +69,7 @@ create table if not exists public.invitaciones_grupo (
 
 create index if not exists invitaciones_grupo_grupo_id_idx on public.invitaciones_grupo(grupo_id);
 create index if not exists invitaciones_grupo_email_idx on public.invitaciones_grupo(lower(email_invitado));
+create index if not exists invitaciones_grupo_token_idx on public.invitaciones_grupo(token);
 create unique index if not exists invitaciones_grupo_pendiente_email_unica_idx
   on public.invitaciones_grupo(grupo_id, lower(email_invitado))
   where estado = 'pendiente';

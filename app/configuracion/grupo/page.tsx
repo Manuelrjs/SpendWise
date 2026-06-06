@@ -2,11 +2,24 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useAuthSpendWise } from '@/components/auth-context';
+import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
+import { normalizarErrorTecnico, type ErrorTecnico } from '@/lib/errores';
 import { supabase } from '@/lib/supabase/client';
 
 type Miembro = { id: string; nombre: string | null; email: string | null; rol: string };
 type Invitacion = { id: string; email_invitado: string; rol: string; token: string; creado_en: string; expira_en: string | null };
 type Mensaje = { tipo: 'ok' | 'error'; texto: string } | null;
+
+function crearTokenInvitacion() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function crearFechaExpiracion() {
+  const fecha = new Date();
+  fecha.setDate(fecha.getDate() + 7);
+  return fecha.toISOString();
+}
 
 function crearLink(token: string) {
   if (typeof window === 'undefined') return `/aceptar-invitacion?token=${token}`;
@@ -22,6 +35,7 @@ export default function GrupoPage() {
   const [mensaje, setMensaje] = useState<Mensaje>(null);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
+  const [errorTecnico, setErrorTecnico] = useState<ErrorTecnico | null>(null);
 
   const cargarDatos = useCallback(async () => {
     if (!perfil?.grupo_id) return;
@@ -45,18 +59,43 @@ export default function GrupoPage() {
 
   async function invitar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
-    if (!perfil?.grupo_id || perfil.rol !== 'admin') return;
+    if (!perfil?.grupo_id || perfil.rol !== 'admin' || !session?.user.id) return;
     const emailLimpio = email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(emailLimpio)) {
       setMensaje({ tipo: 'error', texto: 'Ingresá un email válido.' });
       return;
     }
 
+    const payload = {
+      grupo_id: perfil.grupo_id,
+      email_invitado: emailLimpio,
+      rol,
+      estado: 'pendiente',
+      token: crearTokenInvitacion(),
+      invitado_por: session.user.id,
+      expira_en: crearFechaExpiracion(),
+    };
+
     setGuardando(true);
     setMensaje(null);
-    const { data, error } = await supabase.from('invitaciones_grupo').insert({ grupo_id: perfil.grupo_id, email_invitado: emailLimpio, rol }).select('id,email_invitado,rol,token,creado_en,expira_en').single();
+    setErrorTecnico(null);
+    const { data, error } = await supabase
+      .from('invitaciones_grupo')
+      .insert(payload)
+      .select('id,email_invitado,rol,token,creado_en,expira_en')
+      .single();
+
     if (error || !data) {
-      console.error('Error creando invitación', error);
+      const detalle = normalizarErrorTecnico(error ?? new Error('Supabase no devolvió la invitación creada.'));
+      console.error('Error creando invitación', {
+        message: error?.message,
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint,
+        payload,
+        raw: error,
+      });
+      setErrorTecnico({ ...detalle, raw: { error, payload } });
       setMensaje({ tipo: 'error', texto: error?.code === '23505' ? 'Ya existe una invitación pendiente para este email.' : 'No se pudo crear la invitación.' });
     } else {
       setEmail('');
@@ -85,6 +124,7 @@ export default function GrupoPage() {
   return <section className="mx-auto max-w-5xl space-y-6">
     <header><h1 className="text-2xl font-semibold">Grupo</h1><p className="mt-1 text-sm text-slate-600">Administrá quién comparte los gastos y tarjetas del grupo activo.</p></header>
     {mensaje && <div className={`rounded-xl border px-4 py-3 text-sm ${mensaje.tipo === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{mensaje.texto}</div>}
+    <ErrorTecnicoDesarrollo error={errorTecnico} />
 
     <div className="grid gap-6 lg:grid-cols-2">
       <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-semibold">Datos del grupo</h2><dl className="mt-4 grid grid-cols-[auto,1fr] gap-x-4 gap-y-2 text-sm"><dt className="text-slate-500">Nombre</dt><dd className="font-medium">{perfil?.grupo_nombre ?? 'Grupo activo'}</dd><dt className="text-slate-500">Tu email</dt><dd className="break-all font-medium">{session?.user.email ?? perfil?.email}</dd><dt className="text-slate-500">Tu rol</dt><dd className="font-medium capitalize">{perfil?.rol}</dd></dl></article>
