@@ -5,6 +5,7 @@ export type PerfilActivo = {
   email: string | null;
   grupo_id: string;
   grupo_nombre: string | null;
+  rol: 'admin' | 'miembro';
 };
 
 let perfilActivoCache: PerfilActivo | null = null;
@@ -39,7 +40,7 @@ export async function obtenerPerfilActivo(userId?: string, email?: string | null
 
     const { data: perfil, error: perfilError } = await supabase
       .from('perfiles')
-      .select('id,email,grupo_id,grupos:grupo_id(nombre)')
+      .select('id,email,grupo_id,rol,grupos:grupo_id(nombre)')
       .eq('id', usuarioId)
       .maybeSingle();
 
@@ -51,11 +52,12 @@ export async function obtenerPerfilActivo(userId?: string, email?: string | null
       ? perfil.grupos[0]?.nombre ?? null
       : (perfil.grupos as { nombre?: string } | null)?.nombre ?? null;
 
-    const perfilActivo = {
+    const perfilActivo: PerfilActivo = {
       userId: usuarioId,
       email: perfil.email ?? email ?? null,
       grupo_id: perfil.grupo_id,
       grupo_nombre: grupoNombre,
+      rol: perfil.rol === 'admin' ? 'admin' : 'miembro',
     };
 
     perfilActivoCache = perfilActivo;

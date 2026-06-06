@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import { ensureUserProfile } from '@/lib/auth/ensure-user-profile';
@@ -27,6 +27,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [mensaje, setMensaje] = useState('Ingresá para continuar.');
   const [loading, setLoading] = useState(false);
+  const [retorno, setRetorno] = useState('/');
+
+  useEffect(() => {
+    const destino = new URLSearchParams(window.location.search).get('retorno');
+    if (destino?.startsWith('/') && !destino.startsWith('//')) setRetorno(destino);
+  }, []);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -49,7 +55,7 @@ export default function LoginPage() {
 
       await ensureUserProfile(data.user);
       setMensaje('Sesión iniciada correctamente. Redirigiendo...');
-      router.replace('/');
+      router.replace(retorno);
     } catch (error) {
       console.error('Error inesperado durante login', error);
       setMensaje('No se pudo iniciar sesión. Intentá nuevamente.');
@@ -70,7 +76,7 @@ export default function LoginPage() {
           {loading ? 'Ingresando...' : 'Iniciar sesión'}
         </button>
       </form>
-      <Link href="/registro" className="mt-3 inline-block text-sm text-emerald-700">Crear cuenta</Link>
+      <Link href={`/registro?retorno=${encodeURIComponent(retorno)}`} className="mt-3 inline-block text-sm text-emerald-700">Crear cuenta</Link>
     </section>
   );
 }

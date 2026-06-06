@@ -16,7 +16,8 @@ import { AuthSpendWiseProvider } from '@/components/auth-context';
 import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
 import { registrarErrorSpendWise, type ErrorTecnico } from '@/lib/errores';
 
-const RUTAS_PUBLICAS = new Set(['/login', '/registro']);
+const RUTAS_PUBLICAS = new Set(['/login', '/registro', '/aceptar-invitacion']);
+const RUTAS_SOLO_SIN_SESION = new Set(['/login', '/registro']);
 const TIEMPO_AVISO_CONEXION_MS = 3000;
 const TIEMPO_MOSTRAR_REINTENTO_MS = 8000;
 
@@ -192,7 +193,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const esPublica = RUTAS_PUBLICAS.has(pathname);
     if (!cargandoSesion && !session && !esPublica) router.replace('/login');
-    if (!cargandoSesion && session && esPublica) router.replace('/');
+    if (!cargandoSesion && session && RUTAS_SOLO_SIN_SESION.has(pathname)) {
+      const retorno = new URLSearchParams(window.location.search).get('retorno');
+      router.replace(retorno?.startsWith('/') && !retorno.startsWith('//') ? retorno : '/');
+    }
   }, [cargandoSesion, pathname, router, session]);
 
   const reintentarPerfil = useCallback(async () => {
