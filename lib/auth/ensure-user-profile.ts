@@ -21,6 +21,14 @@ function nombrePerfilPorDefecto(user: User) {
   return user.user_metadata?.nombre ?? user.email?.split('@')[0] ?? 'Usuario';
 }
 
+async function asegurarMembresiaActual() {
+  const { error } = await supabase.rpc('asegurar_membresia_perfil_actual');
+  if (error) {
+    console.error('Error asegurando membresía del grupo activo', { code: error.code, message: error.message, details: error.details });
+    throw new Error(ERROR_PERFIL);
+  }
+}
+
 async function crearGrupoPorDefecto(email?: string | null) {
   const { data, error } = await supabase
     .from('grupos')
@@ -72,6 +80,7 @@ export async function ensureUserProfile(user: User): Promise<Perfil> {
       if (process.env.NODE_ENV !== 'production') {
         console.debug('[debug] ensureUserProfile: perfil encontrado', { userId: user.id, grupo_id: perfilActual.grupo_id });
       }
+      await asegurarMembresiaActual();
       return perfilActual;
     }
 
@@ -103,6 +112,7 @@ export async function ensureUserProfile(user: User): Promise<Perfil> {
         throw new Error(ERROR_PERFIL);
       }
 
+      await asegurarMembresiaActual();
       return perfilCreado;
     }
 
@@ -122,6 +132,7 @@ export async function ensureUserProfile(user: User): Promise<Perfil> {
       throw new Error(ERROR_PERFIL);
     }
 
+    await asegurarMembresiaActual();
     return perfilActualizado;
   })();
 

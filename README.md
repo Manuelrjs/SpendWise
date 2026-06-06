@@ -395,47 +395,52 @@ p.grupo_id::text = (storage.foldername(name))[1]
 4. Cerrar sesión e iniciar con **Usuario 2**. Confirmar que no ve comprobantes del Usuario 1 por las consultas filtradas por `grupo_id` y RLS.
 5. Revisar Storage: los comprobantes nuevos deben quedar bajo carpeta `{grupo_id}/...`; las carpetas antiguas `2026/...` pueden seguir existiendo y no se borran.
 
-## Invitar usuarios al grupo
+## Multi-grupo e invitaciones
 
-La pantalla **Grupo** (`/configuracion/grupo`) permite que un usuario con rol `admin` invite a otra persona a compartir el grupo activo.
+La pantalla **Grupo** (`/configuracion/grupo`) permite ver el grupo activo, listar las membresías activas y cambiar de grupo. `perfiles.grupo_id` conserva el grupo activo o predeterminado para que las pantallas operativas y sus políticas RLS sigan trabajando con un único contexto. La pertenencia real se guarda en `public.miembros_grupo`.
 
-1. El administrador ingresa el email del destinatario, elige el rol inicial (`miembro` o `admin`) y presiona **Invitar**.
-2. SpendWise crea una invitación pendiente con un token aleatorio seguro y muestra el botón **Copiar link**. Por ahora el enlace se comparte manualmente por WhatsApp, email u otro medio; no hay envío automático.
-3. El destinatario abre `/aceptar-invitacion?token=...`. Si no inició sesión, debe ingresar o registrarse con el mismo email al que llegó la invitación y luego volverá automáticamente al enlace.
-4. Al aceptar, su `perfiles.grupo_id` y su rol cambian al grupo invitante. La invitación queda aceptada y deja de estar disponible.
+- Cada pareja `grupo_id` + `usuario_id` es única.
+- Una membresía define el rol (`admin` o `miembro`) y el estado (`activo` o `inactivo`) dentro de ese grupo.
+- Al cambiar el grupo activo, el RPC `cambiar_grupo_activo` valida que exista una membresía activa, actualiza `perfiles.grupo_id`, sincroniza el rol y recarga el contexto de la app.
+- Si el usuario pertenece a un solo grupo, el encabezado muestra su nombre. Si pertenece a varios, muestra el selector **Cambiar grupo**.
 
-Por ahora, cada usuario puede pertenecer a **un solo grupo**. Si ya tenía un grupo propio, sus datos anteriores no se mueven ni se borran automáticamente; simplemente deja de verlos al cambiar su grupo activo. El soporte multi-grupo queda para una fase posterior.
+### Aceptar una invitación
 
-### Migración de invitaciones
+1. El administrador del grupo activo crea la invitación y comparte manualmente el link; todavía no hay envío automático de email.
+2. El destinatario abre `/aceptar-invitacion?token=...`, inicia sesión con el email invitado y acepta.
+3. La aceptación crea o reactiva su fila de `miembros_grupo` con el rol indicado y marca la invitación como aceptada.
+4. Su `perfiles.grupo_id` **no cambia automáticamente**, por lo que conserva el acceso directo a su grupo anterior. Puede elegir **Cambiar a este grupo ahora** o usar después el selector.
+5. Solo un `admin` de la membresía del grupo activo puede crear o cancelar invitaciones.
 
-Para una instalación nueva, ejecutar `supabase/migrations/012_invitaciones_grupo.sql` en Supabase SQL Editor. La migración crea `public.invitaciones_grupo`, sus índices, validaciones, triggers y políticas RLS. Si no se ejecuta en el proyecto Supabase, la API REST responde `404` al intentar crear una invitación. También permite listar perfiles del mismo grupo y evita que un usuario cambie su propio `grupo_id` o rol sin una invitación válida.
+### Migración multi-grupo
 
-En ambientes que ya ejecutaron una versión anterior de la migración 012, ejecutar después `supabase/migrations/013_remove_gen_random_bytes_invitaciones.sql`. Esta migración correctiva elimina el `DEFAULT` de `token` y reemplaza el trigger de preparación para conservar el token enviado por la app, sin borrar invitaciones existentes ni desactivar RLS.
+Ejecutar `supabase/migrations/014_multi_grupo_miembros.sql` después de las migraciones de invitaciones. La migración:
 
-El token se genera en el navegador antes del `INSERT` usando 32 bytes de `crypto.getRandomValues`, se convierte a hexadecimal y se envía siempre en el payload. La columna queda definida como `token text not null unique`, sin generación automática en PostgreSQL.
+- crea `public.miembros_grupo`, índices, restricciones, trigger de actualización y políticas RLS;
+- hace backfill de todos los perfiles que tengan `grupo_id`, sin borrar perfiles, grupos, invitaciones ni datos operativos;
+- reemplaza la aceptación anterior para crear la membresía sin cambiar el grupo activo;
+- agrega los RPC seguros `asegurar_membresia_perfil_actual` y `cambiar_grupo_activo`;
+- mantiene `perfiles.grupo_id` como filtro del grupo activo, por lo que no reasigna gastos ni amplía automáticamente las consultas operativas.
 
-Para confirmar que el default fue eliminado, ejecutar:
+### Recuperar un usuario que perdió su grupo activo anterior
+
+Si una aceptación previa dejó a Usuario 1 apuntando al grupo de Usuario 2, crear o reactivar una membresía para **cada uno de los dos grupos**. El grupo original debe conservar el rol que corresponda, normalmente `admin`:
 
 ```sql
-select
-  column_name,
-  column_default
-from information_schema.columns
-where table_schema = 'public'
-  and table_name = 'invitaciones_grupo'
-  and column_name = 'token';
+insert into public.miembros_grupo (grupo_id, usuario_id, email, rol, estado)
+values
+  ('UUID_GRUPO_ORIGINAL', 'UUID_USUARIO_1', 'usuario1@ejemplo.com', 'admin', 'activo'),
+  ('UUID_GRUPO_INVITANTE', 'UUID_USUARIO_1', 'usuario1@ejemplo.com', 'miembro', 'activo')
+on conflict (grupo_id, usuario_id) do update
+set email = excluded.email, rol = excluded.rol, estado = 'activo', actualizado_en = now();
 ```
 
-El valor de `column_default` debe ser `NULL`.
+Después, Usuario 1 puede entrar a **Grupo**, seleccionar su grupo original y continuar viendo sus datos. Este procedimiento no mueve ni reasigna gastos.
 
-### Validación manual de invitaciones
+### Validación manual multi-grupo
 
-1. Ejecutar `supabase/migrations/012_invitaciones_grupo.sql` en una instalación nueva o `supabase/migrations/013_remove_gen_random_bytes_invitaciones.sql` si la tabla ya existe. Ejecutar el SQL de diagnóstico y confirmar que `column_default` es `NULL`.
-2. Iniciar como **Usuario 1 admin**, crear una invitación para Usuario 2 y comprobar que no aparece el error `function gen_random_bytes(integer) does not exist`, se guarda un registro con `estado = 'pendiente'`, `email_invitado` y `grupo_id` correctos, y un `token` hexadecimal de 64 caracteres.
-3. Presionar **Copiar link** y confirmar que la URL contiene `?token=` seguido por el token guardado.
-4. Iniciar como usuario `miembro` y comprobar que no aparece el formulario para invitar y que RLS rechaza un `INSERT` manual.
-5. Forzar un fallo de Supabase durante la creación y comprobar que la consola muestra `message`, `code`, `details`, `hint`, `payload` y `raw`; en desarrollo también debe aparecer **“Ver error técnico”**.
-6. Abrir el link sin sesión y comprobar que ofrece iniciar sesión o crear una cuenta, conservando el token para volver después de autenticar.
-7. Iniciar como **Usuario 2** con el email invitado, aceptar y comprobar que su perfil cambia al grupo de Usuario 1, la invitación queda aceptada y puede ver los datos compartidos.
-8. Abrir el link con un usuario de email diferente y comprobar el mensaje **“Esta invitación pertenece a otro email.”**.
-9. Como admin, cancelar una invitación pendiente y comprobar que el link muestra **“Esta invitación ya no está disponible.”**.
+1. Iniciar con Usuario 1 y confirmar que el backfill lo dejó como miembro activo/admin de su grupo original.
+2. Como Usuario 2 admin, invitar a Usuario 1. Aceptar con Usuario 1 y confirmar que aparece una segunda membresía, pero `perfiles.grupo_id` continúa apuntando al grupo original.
+3. Usar el selector para alternar entre ambos grupos y confirmar que todas las pantallas muestran solo los datos del grupo activo.
+4. Confirmar que Usuario 2 sigue como admin de su grupo y puede ver sus miembros e invitaciones pendientes.
+5. Iniciar como miembro sin rol admin y confirmar que no aparece el formulario de invitación y que RLS rechaza crear o cancelar invitaciones.
