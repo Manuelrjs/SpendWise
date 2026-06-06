@@ -394,3 +394,28 @@ p.grupo_id::text = (storage.foldername(name))[1]
 3. Abrir **Historial de gastos** y confirmar que carga aunque existan comprobantes viejos con metadata incompleta. Los comprobantes con ruta deben abrir/descargar; los que no tengan ruta ni URL deben mostrar **“Comprobante no disponible”**.
 4. Cerrar sesión e iniciar con **Usuario 2**. Confirmar que no ve comprobantes del Usuario 1 por las consultas filtradas por `grupo_id` y RLS.
 5. Revisar Storage: los comprobantes nuevos deben quedar bajo carpeta `{grupo_id}/...`; las carpetas antiguas `2026/...` pueden seguir existiendo y no se borran.
+
+## Invitar usuarios al grupo
+
+La pantalla **Grupo** (`/configuracion/grupo`) permite que un usuario con rol `admin` invite a otra persona a compartir el grupo activo.
+
+1. El administrador ingresa el email del destinatario, elige el rol inicial (`miembro` o `admin`) y presiona **Invitar**.
+2. SpendWise crea una invitación pendiente con un token aleatorio seguro y muestra el botón **Copiar link**. Por ahora el enlace se comparte manualmente por WhatsApp, email u otro medio; no hay envío automático.
+3. El destinatario abre `/aceptar-invitacion?token=...`. Si no inició sesión, debe ingresar o registrarse con el mismo email al que llegó la invitación y luego volverá automáticamente al enlace.
+4. Al aceptar, su `perfiles.grupo_id` y su rol cambian al grupo invitante. La invitación queda aceptada y deja de estar disponible.
+
+Por ahora, cada usuario puede pertenecer a **un solo grupo**. Si ya tenía un grupo propio, sus datos anteriores no se mueven ni se borran automáticamente; simplemente deja de verlos al cambiar su grupo activo. El soporte multi-grupo queda para una fase posterior.
+
+### Migración de invitaciones
+
+Ejecutar `supabase/migrations/012_invitaciones_grupo.sql` en Supabase SQL Editor. La migración crea `invitaciones_grupo`, sus índices, validaciones, triggers y políticas RLS. También permite listar perfiles del mismo grupo y evita que un usuario cambie su propio `grupo_id` o rol sin una invitación válida.
+
+
+### Validación manual de invitaciones
+
+1. Iniciar como **Usuario 1 admin**, crear una invitación para Usuario 2 y comprobar que aparece pendiente con un link copiable.
+2. Abrir el link sin sesión y comprobar que ofrece iniciar sesión o crear una cuenta, conservando el token para volver después de autenticar.
+3. Iniciar como **Usuario 2** con el email invitado, aceptar y comprobar que su perfil cambia al grupo de Usuario 1, la invitación queda aceptada y puede ver los datos compartidos.
+4. Abrir el link con un usuario de email diferente y comprobar el mensaje **“Esta invitación pertenece a otro email.”**.
+5. Iniciar como usuario `miembro` y comprobar que no aparece el formulario para invitar y que RLS rechaza un `INSERT` manual.
+6. Como admin, cancelar una invitación pendiente y comprobar que el link muestra **“Esta invitación ya no está disponible.”**.
