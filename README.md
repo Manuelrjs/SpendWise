@@ -444,3 +444,22 @@ Después, Usuario 1 puede entrar a **Grupo**, seleccionar su grupo original y co
 3. Usar el selector para alternar entre ambos grupos y confirmar que todas las pantallas muestran solo los datos del grupo activo.
 4. Confirmar que Usuario 2 sigue como admin de su grupo y puede ver sus miembros e invitaciones pendientes.
 5. Iniciar como miembro sin rol admin y confirmar que no aparece el formulario de invitación y que RLS rechaza crear o cancelar invitaciones.
+
+## Administración de miembros del grupo
+
+La pantalla **Grupo** permite que todos los integrantes activos vean miembros, roles y estados. Solo los administradores ven las acciones para invitar, cambiar roles, quitar integrantes y cancelar invitaciones pendientes.
+
+La migración `supabase/migrations/015_administracion_miembros_grupo.sql` agrega los RPC seguros `cambiar_rol_miembro_grupo` y `quitar_miembro_grupo`. Ambos vuelven a validar en PostgreSQL que quien ejecuta sea admin. Las demociones y bajas del último admin son rechazadas con **“El grupo debe tener al menos un administrador.”**. Quitar a una persona cambia su membresía a `inactivo`, conserva todos sus datos operativos y, si ese era su grupo activo, cambia su perfil a otra membresía activa o crea un grupo personal seguro.
+
+Las invitaciones pendientes muestran rol, estado, creación, expiración y link copiable. Cancelar conserva la fila con estado `cancelada`; el trigger de invitaciones impide luego aceptar ese link. El selector continúa consultando únicamente membresías con estado `activo` y `cambiar_grupo_activo` sincroniza `perfiles.grupo_id` y `perfiles.rol`.
+
+### Validación manual de administración con dos usuarios
+
+1. Iniciar con **Usuario 1 admin**, abrir `/configuracion/grupo` y confirmar que ve miembros, invitaciones y formulario para invitar.
+2. Invitar a **Usuario 2** como miembro, copiar el link, aceptarlo con Usuario 2 y volver al grupo invitante desde el selector.
+3. Con Usuario 1, cambiar a Usuario 2 de Miembro a Admin. Recargar con Usuario 2 y confirmar que su rol activo es Admin.
+4. Con Usuario 1, intentar degradar o quitar al único admin de un grupo de prueba. Debe aparecer **“El grupo debe tener al menos un administrador.”**.
+5. Con dos admins, quitar a Usuario 2. Su fila debe quedar `inactivo`, sus gastos deben conservarse y el grupo ya no debe aparecer en su selector.
+6. Entrar como miembro no admin y confirmar que puede ver miembros pero no ve controles de administración; las llamadas directas a los RPC deben ser rechazadas.
+7. Crear otra invitación con Usuario 1, cancelarla y abrir su link. Debe mostrarse como no disponible.
+8. Alternar entre dos grupos activos y confirmar que `perfiles.grupo_id`, `perfiles.rol` y las pantallas cambian al contexto seleccionado.
