@@ -4,12 +4,12 @@ import { NavegacionPrincipal } from '@/components/navegacion-principal';
 import { AuthGuard } from '@/components/auth-guard';
 
 export const metadata: Metadata = {
-  title: 'SpendWise',
-  description: 'Control familiar de gastos, tarjetas y comprobantes.',
+  title: 'SpendFlow Planner',
+  description: 'Gastos, cuotas y compromisos futuros',
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
-    title: 'SpendWise',
+    title: 'SpendFlow',
     statusBarStyle: 'default',
   },
   icons: {

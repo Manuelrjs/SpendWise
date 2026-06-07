@@ -227,7 +227,7 @@ export default function Page() {
     <section className="mx-auto max-w-6xl space-y-6">
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold">Configuración · Categorías</h1>
-        <p className="text-sm text-slate-600">Administrá las categorías disponibles en SpendWise.</p>
+        <p className="text-sm text-slate-600">Administrá las categorías disponibles en SpendFlow Planner.</p>
       </header>
 
       {perfilCargando ? <p className="text-sm text-slate-500">Cargando grupo...</p> : null}

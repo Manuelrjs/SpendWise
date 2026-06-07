@@ -534,7 +534,7 @@ export default function Page() {
   return (
     <section className="mx-auto max-w-[1440px] space-y-5 px-2 pb-6 md:px-4">
       <header className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">SpendWise</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">SpendFlow Planner</p>
         <h1 className="text-2xl font-semibold">Calendario de cierres y vencimientos</h1>
         <p className="text-sm text-slate-600">
           El calendario por período es la fuente principal para proyectar en qué resumen entra cada gasto.

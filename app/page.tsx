@@ -306,7 +306,7 @@ export default function DashboardPage() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">Dashboard</h1>
-            <p className="text-sm text-slate-600">Resumen ejecutivo mensual de SpendWise.</p>
+            <p className="text-sm text-slate-600">Resumen ejecutivo mensual de SpendFlow Planner.</p>
           </div>
           <label className="flex flex-col gap-1 text-sm text-slate-700">
             Mes
