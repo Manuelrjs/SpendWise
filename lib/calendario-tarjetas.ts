@@ -125,7 +125,7 @@ export async function obtenerOCrearCalendarioEstimado(params: {
 
   if (!cuenta.dia_cierre_habitual || cuenta.dias_hasta_vencimiento === null) {
     const nombreCuenta = cuenta.nombre_cuenta?.trim() || 'sin nombre';
-    throw new Error(`La cuenta ${nombreCuenta} no tiene configurado el día de cierre habitual o los días hasta vencimiento. Completalos en Tarjetas para que SpendWise pueda crear calendarios automáticamente.`);
+    throw new Error(`La cuenta ${nombreCuenta} no tiene configurado el día de cierre habitual o los días hasta vencimiento. Completalos en Tarjetas para que SpendFlow Planner pueda crear calendarios automáticamente.`);
   }
 
   const fecha_cierre = construirFechaCierreEstimada(periodo, cuenta.dia_cierre_habitual);

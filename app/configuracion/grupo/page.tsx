@@ -121,7 +121,7 @@ export default function GrupoPage() {
     else {
       setEmail('');
       setInvitaciones((actuales) => [data as Invitacion, ...actuales]);
-      setMensaje({ tipo: 'ok', texto: 'Invitación creada.' });
+      setMensaje({ tipo: 'ok', texto: 'Invitación creada para SpendFlow Planner.' });
     }
     setAccionEnCurso(null);
   }

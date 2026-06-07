@@ -297,7 +297,7 @@ function PantallaCargaInicial({
     <div className="flex min-h-[60vh] items-center justify-center p-6">
       <section className="w-full max-w-md rounded-3xl border border-emerald-100 bg-white p-6 text-center shadow-sm">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-2xl">💸</div>
-        <h1 className="mt-4 text-xl font-semibold text-slate-900">Preparando SpendWise...</h1>
+        <h1 className="mt-4 text-xl font-semibold text-slate-900">Preparando SpendFlow Planner...</h1>
         <p className="mt-2 text-sm text-slate-600">Cargando tu grupo y datos iniciales...</p>
         <div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-100">
           <div className="h-full w-2/3 animate-pulse rounded-full bg-emerald-500" />

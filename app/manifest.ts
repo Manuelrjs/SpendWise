@@ -2,9 +2,9 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'SpendWise',
-    short_name: 'SpendWise',
-    description: 'Control familiar de gastos, tarjetas y comprobantes.',
+    name: 'SpendFlow Planner',
+    short_name: 'SpendFlow',
+    description: 'Gastos, cuotas y compromisos futuros',
     start_url: '/',
     scope: '/',
     display: 'standalone',

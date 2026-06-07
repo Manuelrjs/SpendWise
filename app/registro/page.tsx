@@ -51,7 +51,9 @@ export default function RegistroPage() {
 
   return (
     <section className="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-6">
-      <h1 className="text-2xl font-semibold">Crear cuenta</h1>
+      <h1 className="text-2xl font-semibold">SpendFlow Planner</h1>
+      <p className="mt-1 text-sm text-slate-600">Controlá tus gastos y anticipá tus pagos.</p>
+      <h2 className="mt-4 text-lg font-medium">Crear cuenta</h2>
       <p className="mt-2 text-sm">{mensaje}</p>
       <form onSubmit={onSubmit} className="mt-4 space-y-3">
         <input className="w-full rounded-lg border p-2" placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />

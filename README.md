@@ -1,6 +1,6 @@
-# SpendWise
+# SpendFlow Planner
 
-SpendWise es una aplicación web responsive para control de gastos familiares, tarjetas de crédito, cuotas y flujo mensual de pagos.
+Aplicación para controlar gastos, tarjetas, cuotas y compromisos futuros por grupo.
 
 ## Objetivo
 
@@ -136,12 +136,12 @@ OPENAI_API_KEY=
 - Si falta `OPENAI_API_KEY`, la app muestra: **"La extracción automática aún no está configurada."**
 
 
-## Instalar SpendWise en iPhone como PWA
+## Instalar SpendFlow Planner en iPhone como PWA
 
-1. Abrir la URL de SpendWise en **Safari**.
+1. Abrir la URL de SpendFlow Planner en **Safari**.
 2. Tocar el botón **Compartir**.
 3. Elegir **Agregar a pantalla de inicio**.
-4. Confirmar el nombre **SpendWise**.
+4. Confirmar el nombre corto **SpendFlow**.
 5. Abrir la app desde el ícono en la pantalla de inicio.
 
 Notas importantes:
@@ -155,21 +155,21 @@ Notas importantes:
 ### Flujo recomendado
 
 1. Guardar la imagen del comprobante desde WhatsApp en **Fotos** o **Archivos**.
-2. Abrir SpendWise.
+2. Abrir SpendFlow Planner.
 3. Ir a **Nuevo gasto**.
 4. Tocar **Elegir de galería** o **Subir archivo**.
 5. Tocar **Analizar comprobante** para obtener sugerencias.
 
 ### Flujo experimental (PWA Share Target)
 
-1. Compartir imagen/PDF desde WhatsApp o Fotos hacia **SpendWise** (si aparece como opción).
-2. SpendWise abre **/gastos/nuevo** con el comprobante precargado para revisión manual.
+1. Compartir imagen/PDF desde WhatsApp o Fotos hacia **SpendFlow** (si aparece como opción).
+2. SpendFlow Planner abre **/gastos/nuevo** con el comprobante precargado para revisión manual.
 
 Notas:
 
 - En iPhone, las PWA pueden no aparecer como destino directo en el menú Compartir.
 - El soporte de compartir directo depende de iOS/Safari y de si la PWA está instalada.
-- Si SpendWise no aparece en el menú de compartir, usar el flujo recomendado de galería/archivos.
+- Si SpendFlow no aparece en el menú de compartir, usar el flujo recomendado de galería/archivos.
 - Los PDF simples ya pueden analizarse con IA en /gastos/nuevo. Para resúmenes de tarjeta, la conciliación queda para una fase posterior.
 
 ## Análisis de comprobantes PDF
@@ -200,7 +200,7 @@ Notas:
 ### Confirmación de email en Supabase
 
 - Si en Supabase Auth está activa la confirmación de email, el registro puede crear el usuario **sin iniciar sesión inmediata**.
-- En ese caso, SpendWise muestra: **"Cuenta creada. Revisá tu correo para confirmar el acceso."**
+- En ese caso, SpendFlow Planner muestra: **"Cuenta creada. Revisá tu correo para confirmar el acceso."**
 - Hasta confirmar el correo, el login puede devolver el error de email no confirmado.
 
 ### Desarrollo local rápido
@@ -218,7 +218,7 @@ Notas:
 
 ### Si no se crea perfil/grupo automáticamente
 
-- SpendWise intenta reparar el perfil en cada login/sesión con `ensureUserProfile`.
+- SpendFlow Planner intenta reparar el perfil en cada login/sesión con `ensureUserProfile`.
 - Si el usuario existe en Auth pero no tiene perfil o grupo, la app crea los datos faltantes.
 - Si falla la reparación, se muestra un mensaje claro para reintentar sesión y revisar logs de cliente.
 
@@ -265,7 +265,7 @@ Si los conteos dan `0`, el backfill quedó aplicado para esas tablas.
 
 ## Seguridad por grupo con RLS
 
-Desde la Tarea 30, SpendWise protege las tablas operativas con **Row Level Security (RLS)** en Supabase usando `grupo_id`.
+Desde la Tarea 30, SpendFlow Planner protege las tablas operativas con **Row Level Security (RLS)** en Supabase usando `grupo_id`.
 
 ### Activar RLS en Supabase
 

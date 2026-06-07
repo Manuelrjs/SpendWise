@@ -66,8 +66,8 @@ export default function LoginPage() {
 
   return (
     <section className="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-6">
-      <h1 className="text-2xl font-semibold">SpendWise</h1>
-      <p className="mt-1 text-sm text-slate-600">Control familiar de gastos, tarjetas y comprobantes.</p>
+      <h1 className="text-2xl font-semibold">SpendFlow Planner</h1>
+      <p className="mt-1 text-sm text-slate-600">Gastos, cuotas y compromisos futuros</p>
       <p className="mt-4 text-sm text-slate-700">{mensaje}</p>
       <form onSubmit={onSubmit} className="mt-4 space-y-3">
         <input className="w-full rounded-lg border p-2" placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
