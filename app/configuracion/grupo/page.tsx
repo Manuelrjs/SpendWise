@@ -4,12 +4,18 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useAuthSpendWise } from '@/components/auth-context';
 import { ErrorTecnicoDesarrollo } from '@/components/error-tecnico-desarrollo';
 import { SelectorGrupoActivo } from '@/components/selector-grupo-activo';
+import { limpiarPerfilActivoCache } from '@/lib/auth/grupo-activo';
 import { normalizarErrorTecnico, type ErrorTecnico } from '@/lib/errores';
 import { supabase } from '@/lib/supabase/client';
 
-type Miembro = { id: string; usuario_id: string; email: string | null; rol: string; estado: string };
-type Invitacion = { id: string; email_invitado: string; rol: string; token: string; creado_en: string; expira_en: string | null };
+type RolGrupo = 'admin' | 'miembro';
+type Miembro = { id: string; usuario_id: string; email: string | null; rol: RolGrupo; estado: 'activo' | 'inactivo' };
+type Invitacion = { id: string; email_invitado: string; rol: RolGrupo; estado: string; token: string; creado_en: string; expira_en: string | null };
 type Mensaje = { tipo: 'ok' | 'error'; texto: string } | null;
+type AccionGrupo = 'cargar datos' | 'invitar' | 'cambiar rol' | 'quitar miembro' | 'cancelar invitación' | 'copiar invitación';
+
+const SIN_PERMISOS = 'No tenés permisos para administrar este grupo.';
+const GRUPO_SIN_ADMIN = 'El grupo debe tener al menos un administrador.';
 
 function crearTokenInvitacion() {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
@@ -27,100 +33,153 @@ function crearLink(token: string) {
   return `${window.location.origin}/aceptar-invitacion?token=${token}`;
 }
 
+function etiquetaRol(rol: string) {
+  return rol === 'admin' ? 'Admin' : 'Miembro';
+}
+
+function etiquetaEstado(estado: string) {
+  const etiquetas: Record<string, string> = { activo: 'Activo', inactivo: 'Inactivo', pendiente: 'Pendiente', cancelada: 'Cancelada', aceptada: 'Aceptada', expirada: 'Expirada' };
+  return etiquetas[estado] ?? estado;
+}
+
+function invitacionExpirada(invitacion: Invitacion) {
+  return Boolean(invitacion.expira_en && new Date(invitacion.expira_en) <= new Date());
+}
+
+function fechaLegible(fecha: string | null) {
+  return fecha ? new Date(fecha).toLocaleDateString('es-AR') : 'Sin vencimiento';
+}
+
 export default function GrupoPage() {
-  const { perfil, session } = useAuthSpendWise();
+  const { perfil, session, reintentarPerfil } = useAuthSpendWise();
   const [miembros, setMiembros] = useState<Miembro[]>([]);
   const [invitaciones, setInvitaciones] = useState<Invitacion[]>([]);
   const [email, setEmail] = useState('');
-  const [rol, setRol] = useState<'miembro' | 'admin'>('miembro');
+  const [rol, setRol] = useState<RolGrupo>('miembro');
   const [mensaje, setMensaje] = useState<Mensaje>(null);
   const [cargando, setCargando] = useState(true);
-  const [guardando, setGuardando] = useState(false);
+  const [accionEnCurso, setAccionEnCurso] = useState<string | null>(null);
   const [errorTecnico, setErrorTecnico] = useState<ErrorTecnico | null>(null);
   const manejarErrorSelector = useCallback((texto: string) => setMensaje({ tipo: 'error', texto }), []);
+  const esAdmin = perfil?.rol === 'admin';
+
+  const informarError = useCallback((accion: AccionGrupo, error: unknown, texto: string) => {
+    const detalle = normalizarErrorTecnico(error);
+    console.error('[SpendWise][grupo] Error administrando miembros', {
+      accion,
+      message: detalle.message,
+      code: detalle.code,
+      details: detalle.details,
+      hint: detalle.hint,
+      raw: error,
+    });
+    setErrorTecnico(detalle);
+    setMensaje({ tipo: 'error', texto: detalle.message?.includes(GRUPO_SIN_ADMIN) ? GRUPO_SIN_ADMIN : texto });
+  }, []);
+
+  const validarAdmin = useCallback(() => {
+    if (esAdmin && perfil?.grupo_id) return true;
+    setMensaje({ tipo: 'error', texto: SIN_PERMISOS });
+    return false;
+  }, [esAdmin, perfil?.grupo_id]);
 
   const cargarDatos = useCallback(async () => {
     if (!perfil?.grupo_id) return;
     setCargando(true);
     const [respuestaMiembros, respuestaInvitaciones] = await Promise.all([
-      supabase.from('miembros_grupo').select('id,usuario_id,email,rol,estado').eq('grupo_id', perfil.grupo_id).eq('estado', 'activo').order('creado_en'),
-      supabase.from('invitaciones_grupo').select('id,email_invitado,rol,token,creado_en,expira_en').eq('grupo_id', perfil.grupo_id).eq('estado', 'pendiente').order('creado_en', { ascending: false }),
+      supabase.from('miembros_grupo').select('id,usuario_id,email,rol,estado').eq('grupo_id', perfil.grupo_id).order('creado_en'),
+      supabase.from('invitaciones_grupo').select('id,email_invitado,rol,estado,token,creado_en,expira_en').eq('grupo_id', perfil.grupo_id).eq('estado', 'pendiente').order('creado_en', { ascending: false }),
     ]);
 
-    if (respuestaMiembros.error || respuestaInvitaciones.error) {
-      console.error('Error cargando configuración del grupo', respuestaMiembros.error ?? respuestaInvitaciones.error);
-      setMensaje({ tipo: 'error', texto: 'No se pudo cargar la información del grupo.' });
-    } else {
-      setMiembros(respuestaMiembros.data ?? []);
-      setInvitaciones(respuestaInvitaciones.data ?? []);
+    const error = respuestaMiembros.error ?? respuestaInvitaciones.error;
+    if (error) informarError('cargar datos', error, 'No se pudo cargar la información del grupo.');
+    else {
+      setMiembros((respuestaMiembros.data ?? []) as Miembro[]);
+      setInvitaciones((respuestaInvitaciones.data ?? []) as Invitacion[]);
     }
     setCargando(false);
-  }, [perfil?.grupo_id]);
+  }, [informarError, perfil?.grupo_id]);
 
   useEffect(() => { void cargarDatos(); }, [cargarDatos]);
 
   async function invitar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
-    if (!perfil?.grupo_id || perfil.rol !== 'admin' || !session?.user.id) return;
+    if (!validarAdmin() || !perfil?.grupo_id || !session?.user.id) return;
     const emailLimpio = email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(emailLimpio)) {
       setMensaje({ tipo: 'error', texto: 'Ingresá un email válido.' });
       return;
     }
 
-    const payload = {
-      grupo_id: perfil.grupo_id,
-      email_invitado: emailLimpio,
-      rol,
-      estado: 'pendiente',
-      token: crearTokenInvitacion(),
-      invitado_por: session.user.id,
-      expira_en: crearFechaExpiracion(),
-    };
-
-    setGuardando(true);
+    const payload = { grupo_id: perfil.grupo_id, email_invitado: emailLimpio, rol, estado: 'pendiente', token: crearTokenInvitacion(), invitado_por: session.user.id, expira_en: crearFechaExpiracion() };
+    setAccionEnCurso('invitar');
     setMensaje(null);
     setErrorTecnico(null);
-    const { data, error } = await supabase
-      .from('invitaciones_grupo')
-      .insert(payload)
-      .select('id,email_invitado,rol,token,creado_en,expira_en')
-      .single();
+    const { data, error } = await supabase.from('invitaciones_grupo').insert(payload).select('id,email_invitado,rol,estado,token,creado_en,expira_en').single();
 
-    if (error || !data) {
-      const detalle = normalizarErrorTecnico(error ?? new Error('Supabase no devolvió la invitación creada.'));
-      console.error('Error creando invitación', {
-        message: error?.message,
-        code: error?.code,
-        details: error?.details,
-        hint: error?.hint,
-        payload,
-        raw: error,
-      });
-      setErrorTecnico({ ...detalle, raw: { error, payload } });
-      setMensaje({ tipo: 'error', texto: error?.code === '23505' ? 'Ya existe una invitación pendiente para este email.' : 'No se pudo crear la invitación.' });
-    } else {
+    if (error || !data) informarError('invitar', error ?? new Error('Supabase no devolvió la invitación creada.'), error?.code === '23505' ? 'Ya existe una invitación pendiente para este email.' : 'No se pudo crear la invitación.');
+    else {
       setEmail('');
-      setInvitaciones((actuales) => [data, ...actuales]);
+      setInvitaciones((actuales) => [data as Invitacion, ...actuales]);
       setMensaje({ tipo: 'ok', texto: 'Invitación creada.' });
     }
-    setGuardando(false);
+    setAccionEnCurso(null);
   }
 
-  async function copiar(token: string) {
-    await navigator.clipboard.writeText(crearLink(token));
-    setMensaje({ tipo: 'ok', texto: 'Link copiado.' });
-  }
-
-  async function cancelar(id: string) {
-    const { error } = await supabase.from('invitaciones_grupo').update({ estado: 'cancelada' }).eq('id', id).eq('estado', 'pendiente');
-    if (error) {
-      console.error('Error cancelando invitación', error);
-      setMensaje({ tipo: 'error', texto: 'No se pudo cancelar la invitación.' });
-      return;
+  async function copiar(invitacion: Invitacion) {
+    try {
+      await navigator.clipboard.writeText(crearLink(invitacion.token));
+      setMensaje({ tipo: 'ok', texto: 'Link copiado.' });
+    } catch (error) {
+      informarError('copiar invitación', error, 'No se pudo copiar el link.');
     }
-    setInvitaciones((actuales) => actuales.filter((invitacion) => invitacion.id !== id));
-    setMensaje({ tipo: 'ok', texto: 'Invitación cancelada.' });
+  }
+
+  async function cancelar(invitacion: Invitacion) {
+    if (!validarAdmin() || !window.confirm('¿Seguro que querés cancelar esta invitación?')) return;
+    setAccionEnCurso(invitacion.id);
+    const { error } = await supabase.from('invitaciones_grupo').update({ estado: 'cancelada' }).eq('id', invitacion.id).eq('estado', 'pendiente');
+    if (error) informarError('cancelar invitación', error, 'No se pudo cancelar la invitación.');
+    else {
+      setInvitaciones((actuales) => actuales.filter((actual) => actual.id !== invitacion.id));
+      setMensaje({ tipo: 'ok', texto: 'Invitación cancelada.' });
+    }
+    setAccionEnCurso(null);
+  }
+
+  async function cambiarRol(miembro: Miembro, nuevoRol: RolGrupo) {
+    if (!validarAdmin() || miembro.rol === nuevoRol) return;
+    setAccionEnCurso(miembro.id);
+    setErrorTecnico(null);
+    const { error } = await supabase.rpc('cambiar_rol_miembro_grupo', { miembro_id: miembro.id, nuevo_rol: nuevoRol });
+    if (error) informarError('cambiar rol', error, 'No se pudo cambiar el rol.');
+    else {
+      setMiembros((actuales) => actuales.map((actual) => actual.id === miembro.id ? { ...actual, rol: nuevoRol } : actual));
+      setMensaje({ tipo: 'ok', texto: `Rol actualizado a ${etiquetaRol(nuevoRol)}.` });
+      if (miembro.usuario_id === session?.user.id) {
+        limpiarPerfilActivoCache();
+        await reintentarPerfil();
+      }
+    }
+    setAccionEnCurso(null);
+  }
+
+  async function quitarMiembro(miembro: Miembro) {
+    if (!validarAdmin() || !window.confirm('¿Seguro que querés quitar a esta persona del grupo?')) return;
+    setAccionEnCurso(miembro.id);
+    setErrorTecnico(null);
+    const { error } = await supabase.rpc('quitar_miembro_grupo', { miembro_id: miembro.id });
+    if (error) informarError('quitar miembro', error, 'No se pudo quitar a la persona del grupo.');
+    else if (miembro.usuario_id === session?.user.id) {
+      limpiarPerfilActivoCache();
+      await reintentarPerfil();
+      window.location.reload();
+      return;
+    } else {
+      setMiembros((actuales) => actuales.map((actual) => actual.id === miembro.id ? { ...actual, estado: 'inactivo' } : actual));
+      setMensaje({ tipo: 'ok', texto: 'La persona fue quitada del grupo.' });
+    }
+    setAccionEnCurso(null);
   }
 
   return <section className="mx-auto max-w-5xl space-y-6">
@@ -128,14 +187,22 @@ export default function GrupoPage() {
     {mensaje && <div className={`rounded-xl border px-4 py-3 text-sm ${mensaje.tipo === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{mensaje.texto}</div>}
     <ErrorTecnicoDesarrollo error={errorTecnico} />
 
-    <div className="grid gap-6 lg:grid-cols-3">
-      <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-semibold">Grupo activo</h2><dl className="mt-4 grid grid-cols-[auto,1fr] gap-x-4 gap-y-2 text-sm"><dt className="text-slate-500">Nombre</dt><dd className="font-medium">{perfil?.grupo_nombre ?? 'Grupo activo'}</dd><dt className="text-slate-500">Tu email</dt><dd className="break-all font-medium">{session?.user.email ?? perfil?.email}</dd><dt className="text-slate-500">Tu rol</dt><dd className="font-medium capitalize">{perfil?.rol}</dd></dl></article>
-      <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-semibold">Mis grupos</h2><p className="mt-1 text-sm text-slate-500">Elegí qué grupo querés usar en todas las pantallas.</p><div className="mt-4"><SelectorGrupoActivo mostrarTitulo onError={manejarErrorSelector} /></div></article>
-      <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-semibold">Miembros del grupo activo</h2>{cargando ? <p className="mt-4 text-sm text-slate-500">Cargando...</p> : miembros.length === 0 ? <p className="mt-4 text-sm text-slate-500">No hay miembros activos.</p> : <ul className="mt-4 divide-y divide-slate-100">{miembros.map((miembro) => <li key={miembro.id} className="flex items-center justify-between gap-3 py-3"><div><p className="font-medium">{miembro.email || 'Usuario'}</p><p className="text-xs text-slate-500">{miembro.usuario_id === session?.user.id ? 'Tu membresía' : 'Miembro activo'}</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs capitalize text-slate-600">{miembro.rol}</span></li>)}</ul>}</article>
-    </div>
+    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="text-lg font-semibold">Grupo activo</h2>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2"><div><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Nombre</p><p className="mt-1 font-medium">{perfil?.grupo_nombre ?? 'Grupo activo'}</p></div><div><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Mi rol</p><p className="mt-1 font-medium">{etiquetaRol(perfil?.rol ?? 'miembro')}</p></div></div>
+      <div className="mt-4 max-w-sm"><SelectorGrupoActivo mostrarTitulo onError={manejarErrorSelector} /></div>
+    </article>
 
-    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-semibold">Invitaciones pendientes</h2>{invitaciones.length === 0 ? <p className="mt-3 text-sm text-slate-500">No hay invitaciones pendientes.</p> : <ul className="mt-4 space-y-3">{invitaciones.map((invitacion) => <li key={invitacion.id} className="rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium">{invitacion.email_invitado}</p><p className="mt-1 text-xs text-slate-500">Rol: {invitacion.rol} · Expira: {invitacion.expira_en ? new Date(invitacion.expira_en).toLocaleDateString('es-AR') : 'sin vencimiento'}</p></div>{perfil?.rol === 'admin' && <div className="flex flex-wrap gap-2"><button type="button" onClick={() => void copiar(invitacion.token)} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white">Copiar link</button><button type="button" onClick={() => void cancelar(invitacion.id)} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-medium text-rose-700">Cancelar invitación</button></div>}</div></li>)}</ul>}</article>
+    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-lg font-semibold">Miembros</h2><span className="text-xs text-slate-500">{miembros.filter((miembro) => miembro.estado === 'activo').length} activos</span></div>
+      {cargando ? <p className="mt-4 text-sm text-slate-500">Cargando miembros...</p> : miembros.length === 0 ? <p className="mt-4 text-sm text-slate-500">No hay miembros para mostrar.</p> : <ul className="mt-4 divide-y divide-slate-100">{miembros.map((miembro) => <li key={miembro.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-medium">{miembro.email ?? 'Usuario sin email'}{miembro.usuario_id === session?.user.id ? ' (vos)' : ''}</p><div className="mt-1 flex gap-2 text-xs"><span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{etiquetaRol(miembro.rol)}</span><span className={`rounded-full px-2 py-1 ${miembro.estado === 'activo' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{etiquetaEstado(miembro.estado)}</span></div></div>{esAdmin && miembro.estado === 'activo' ? <div className="flex flex-wrap gap-2"><button type="button" disabled={accionEnCurso === miembro.id} onClick={() => void cambiarRol(miembro, miembro.rol === 'admin' ? 'miembro' : 'admin')} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-60">Hacer {miembro.rol === 'admin' ? 'miembro' : 'admin'}</button><button type="button" disabled={accionEnCurso === miembro.id} onClick={() => void quitarMiembro(miembro)} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-medium text-rose-700 disabled:opacity-60">Quitar del grupo</button></div> : null}</li>)}</ul>}
+    </article>
 
-    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-semibold">Invitar persona</h2>{perfil?.rol !== 'admin' ? <p className="mt-3 text-sm text-slate-600">Solo los administradores pueden invitar personas.</p> : <form onSubmit={invitar} className="mt-4 grid gap-3 sm:grid-cols-[1fr,160px,auto]"><input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="persona@ejemplo.com" className="rounded-lg border border-slate-300 px-3 py-2" /><select value={rol} onChange={(e) => setRol(e.target.value as 'miembro' | 'admin')} className="rounded-lg border border-slate-300 px-3 py-2"><option value="miembro">Miembro</option><option value="admin">Admin</option></select><button disabled={guardando} className="rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white disabled:opacity-60">{guardando ? 'Invitando...' : 'Invitar'}</button></form>}</article>
+    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="text-lg font-semibold">Invitaciones pendientes</h2>
+      {cargando ? <p className="mt-4 text-sm text-slate-500">Cargando invitaciones...</p> : invitaciones.length === 0 ? <p className="mt-4 text-sm text-slate-500">No hay invitaciones pendientes.</p> : <ul className="mt-4 divide-y divide-slate-100">{invitaciones.map((invitacion) => { const expirada = invitacionExpirada(invitacion); return <li key={invitacion.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-medium">{invitacion.email_invitado}</p><div className="mt-1 flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{etiquetaRol(invitacion.rol)}</span><span className={`rounded-full px-2 py-1 ${expirada ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{expirada ? 'Expirada' : etiquetaEstado(invitacion.estado)}</span></div><p className="mt-2 text-xs text-slate-500">Creada: {fechaLegible(invitacion.creado_en)} · Expira: {fechaLegible(invitacion.expira_en)}</p></div>{esAdmin ? <div className="flex flex-wrap gap-2"><button type="button" disabled={expirada} onClick={() => void copiar(invitacion)} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">Copiar link</button><button type="button" disabled={accionEnCurso === invitacion.id} onClick={() => void cancelar(invitacion)} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-medium text-rose-700 disabled:opacity-60">Cancelar</button></div> : null}</li>; })}</ul>}
+    </article>
+
+    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-semibold">Invitar persona</h2>{!esAdmin ? <p className="mt-3 text-sm text-slate-600">Solo los administradores pueden invitar personas.</p> : <form onSubmit={invitar} className="mt-4 grid gap-3 sm:grid-cols-[1fr,160px,auto]"><input type="email" required value={email} onChange={(evento) => setEmail(evento.target.value)} placeholder="persona@ejemplo.com" className="rounded-lg border border-slate-300 px-3 py-2" /><select value={rol} onChange={(evento) => setRol(evento.target.value as RolGrupo)} className="rounded-lg border border-slate-300 px-3 py-2"><option value="miembro">Miembro</option><option value="admin">Admin</option></select><button disabled={accionEnCurso === 'invitar'} className="rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white disabled:opacity-60">{accionEnCurso === 'invitar' ? 'Invitando...' : 'Invitar'}</button></form>}</article>
   </section>;
 }
