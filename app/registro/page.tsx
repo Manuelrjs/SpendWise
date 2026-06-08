@@ -50,15 +50,15 @@ export default function RegistroPage() {
   }
 
   return (
-    <section className="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-6">
+    <section className="sf-auth-card mx-auto mt-8">
       <h1 className="text-2xl font-semibold">SpendFlow Planner</h1>
       <p className="mt-1 text-sm text-slate-600">Controlá tus gastos y anticipá tus pagos.</p>
       <h2 className="mt-4 text-lg font-medium">Crear cuenta</h2>
       <p className="mt-2 text-sm">{mensaje}</p>
       <form onSubmit={onSubmit} className="mt-4 space-y-3">
-        <input className="w-full rounded-lg border p-2" placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <input className="w-full rounded-lg border p-2" placeholder="Contraseña" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        <button disabled={loading} className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-70">
+        <input className="w-full rounded-xl border px-3 py-2.5" placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <input className="w-full rounded-xl border px-3 py-2.5" placeholder="Contraseña" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <button disabled={loading} className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-70">
           {loading ? 'Creando cuenta...' : 'Crear cuenta'}
         </button>
       </form>

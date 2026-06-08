@@ -4,17 +4,59 @@
 
 :root {
   color-scheme: light;
+  --sf-ink: #0f2535;
+  --sf-primary: #059669;
 }
 
+html { background: #f5f8fa; }
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply min-h-screen bg-slate-50 text-slate-900 antialiased;
+  background-image: radial-gradient(circle at 85% -10%, rgba(16, 185, 129, 0.09), transparent 28rem), linear-gradient(180deg, #f8fafc 0%, #f4f7f9 100%);
 }
 
+::selection { @apply bg-emerald-200 text-emerald-950; }
 
-.pb-safe-bottom {
-  padding-bottom: max(6rem, env(safe-area-inset-bottom));
+@layer base {
+  h1, h2, h3 { color: var(--sf-ink); letter-spacing: -0.02em; }
+  main :is(input, select, textarea) { @apply border-slate-300 bg-white text-slate-900 shadow-sm transition placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/15; }
+  main :is(input, select) { min-height: 2.75rem; }
+  main textarea { min-height: 5.5rem; }
+  main button { @apply transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2; }
+  main table { @apply border-separate border-spacing-0; }
+  main thead { @apply bg-slate-50/90 text-slate-500; }
+  main th { @apply whitespace-nowrap text-xs font-semibold uppercase tracking-wide; }
+  main tbody tr { @apply transition hover:bg-emerald-50/30; }
 }
 
-.pt-safe-top {
-  padding-top: env(safe-area-inset-top);
+@layer components {
+  .sf-auth-shell { @apply relative mx-auto flex min-h-[calc(100vh-8rem)] max-w-5xl items-center justify-center py-8; }
+  .sf-auth-card { @apply relative w-full max-w-md overflow-hidden rounded-3xl border border-white/80 bg-white p-6 shadow-[0_24px_80px_rgba(15,37,53,0.14)] sm:p-8; }
+  .sf-kicker { @apply text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-700; }
+  .sf-empty { @apply rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-8 text-center text-sm text-slate-500; }
+  .sf-badge { @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold; }
+  .sf-badge-success { @apply border-emerald-200 bg-emerald-50 text-emerald-700; }
+  .sf-badge-info { @apply border-sky-200 bg-sky-50 text-sky-700; }
+  .sf-badge-warning { @apply border-amber-200 bg-amber-50 text-amber-700; }
+  .sf-badge-neutral { @apply border-slate-200 bg-slate-100 text-slate-600; }
+  .sf-badge-danger { @apply border-rose-200 bg-rose-50 text-rose-700; }
+}
+
+main > section { @apply mx-auto w-full max-w-[1440px]; }
+main > section > header:not([class*="rounded"]) { @apply rounded-2xl border border-white/80 bg-white/70 p-4 shadow-sm backdrop-blur sm:p-5; }
+main article[class*="bg-white"], main div[class*="bg-white"][class*="rounded-2xl"] { @apply border-slate-200/80 shadow-[0_10px_35px_rgba(15,37,53,0.055)]; }
+main article[class*="bg-white"] { @apply transition duration-200; }
+main .overflow-x-auto { @apply rounded-xl border border-slate-200/80; scrollbar-color: #cbd5e1 transparent; }
+main :is(button, a)[class*="bg-emerald-600"] { @apply shadow-sm shadow-emerald-900/15 hover:bg-emerald-700; }
+main :is(button, a)[class*="border"][class*="px-"] { @apply hover:bg-slate-50; }
+main :is(button, a)[class*="text-rose"] { @apply hover:bg-rose-50; }
+
+.pb-safe-bottom { padding-bottom: max(6rem, env(safe-area-inset-bottom)); }
+.pt-safe-top { padding-top: env(safe-area-inset-top); }
+
+@media (max-width: 640px) {
+  main > section { @apply space-y-4; }
+  main > section > header:not([class*="rounded"]) { @apply -mx-1; }
+  main h1 { @apply text-2xl; }
+  main button { min-height: 2.75rem; }
+  main .overflow-x-auto { margin-inline: -0.25rem; border-radius: 0.75rem; }
 }
