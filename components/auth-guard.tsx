@@ -273,8 +273,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
           </div>
         ) : null}
         {perfil?.email && !esRutaPublica ? (
-          <div className="mb-3 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between">
-            <p>Grupo activo: <strong>{perfil.grupo_nombre ?? 'Grupo activo'}</strong> · Sesión: {perfil.email}</p>
+          <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-white/80 bg-white/75 p-3 text-xs text-slate-600 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
+            <div className="flex min-w-0 items-center gap-3"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500 ring-4 ring-emerald-50" /><p className="truncate"><span className="font-semibold text-slate-900">{perfil.grupo_nombre ?? 'Grupo activo'}</span><span className="mx-2 text-slate-300">/</span>{perfil.email}</p></div>
             <div className="w-full sm:w-64"><SelectorGrupoActivo /></div>
           </div>
         ) : null}

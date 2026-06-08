@@ -302,11 +302,12 @@ export default function DashboardPage() {
 
   return (
     <section className="space-y-6">
-      <header className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <header className="overflow-hidden rounded-3xl border border-emerald-100 bg-gradient-to-br from-white via-white to-emerald-50 p-5 shadow-sm sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Dashboard</h1>
-            <p className="text-sm text-slate-600">Resumen ejecutivo mensual de SpendFlow Planner.</p>
+            <p className="sf-kicker mb-1">Control de gastos y flujo futuro</p>
+            <h1 className="text-2xl font-bold text-slate-950 sm:text-3xl">Dashboard</h1>
+            <p className="mt-1 text-sm text-slate-600">Tu resumen ejecutivo mensual, claro y anticipado.</p>
           </div>
           <label className="flex flex-col gap-1 text-sm text-slate-700">
             Mes
@@ -339,14 +340,15 @@ export default function DashboardPage() {
       {cargando ? <SkeletonDashboard /> : null}
       <ErrorTecnicoDesarrollo error={errorTecnico} />
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {!cargando && gastos.length === 0 && cuotasMes.length === 0 && cuotasProximoMes.length === 0 ? (
+        <div className="sf-empty"><p className="font-semibold text-slate-700">Tu grupo está listo para empezar</p><p className="mt-1">Registrá el primer gasto o cargá cuotas pendientes para ver tu proyección mensual.</p></div>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <CardMetrica titulo="Gastos del mes" valor={formatearMonto(gastoTotalMes)} subtitulo="Suma de gastos no anulados" />
         <CardMetrica titulo="Tarjetas a reservar este mes" valor={formatearMonto(totalReservarMes)} subtitulo="Cuotas pendientes del período" />
         <CardMetrica titulo="Comprometido próximo mes" valor={formatearMonto(comprometidoProximoMes)} subtitulo={obtenerSiguientePeriodo(mesSeleccionado)} />
         <CardMetrica titulo="Gastos registrados" valor={String(gastos.length)} subtitulo="Cantidad de gastos del mes" />
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <CardMetrica
           titulo="Cuotas visibles"
           valor={String(cuotasMes.length)}
@@ -430,14 +432,14 @@ function CardMetrica({ titulo, valor, subtitulo, esInteractiva = false, onClick 
   return (
     <article
       onClick={onClick}
-      className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ${esInteractiva ? 'cursor-pointer transition hover:border-slate-400 hover:shadow' : ''}`}
+      className={`group relative min-h-36 overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_10px_35px_rgba(15,37,53,0.06)] transition before:absolute before:inset-x-0 before:top-0 before:h-1 before:bg-gradient-to-r before:from-emerald-500 before:to-teal-500 ${esInteractiva ? 'cursor-pointer hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-lg' : 'hover:-translate-y-0.5'}`}
       role={esInteractiva ? 'button' : undefined}
       tabIndex={esInteractiva ? 0 : undefined}
       onKeyDown={esInteractiva ? (e) => { if (e.key === 'Enter' || e.key === ' ') onClick?.(); } : undefined}
     >
-      <p className="text-sm text-slate-600">{titulo}</p>
-      <p className="mt-2 text-2xl font-semibold text-slate-900">{valor}</p>
-      <p className="mt-1 text-xs text-slate-500">{subtitulo}</p>
+      <div className="mb-5 flex items-start justify-between gap-3"><p className="text-sm font-semibold text-slate-600">{titulo}</p><span className="h-2.5 w-2.5 rounded-full bg-emerald-400 ring-4 ring-emerald-50" /></div>
+      <p className="break-words text-2xl font-bold tracking-tight text-slate-950 sm:text-[1.7rem]">{valor}</p>
+      <p className="mt-1.5 text-xs leading-5 text-slate-500">{subtitulo}</p>
     </article>
   );
 }
@@ -447,7 +449,7 @@ function CardListado({ titulo, filas, vacio }: { titulo: string; filas: FilaResu
     <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="text-base font-semibold text-slate-900">{titulo}</h2>
       {filas.length === 0 ? (
-        <p className="mt-3 text-sm text-slate-500">{vacio}</p>
+        <div className="sf-empty mt-4 py-6">{vacio}</div>
       ) : (
         <ul className="mt-3 space-y-2">
           {filas.map((fila) => (

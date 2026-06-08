@@ -29,7 +29,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <div className="min-h-screen md:flex">
           <NavegacionPrincipal />
-          <main className="w-full px-4 pt-6 pb-safe-bottom md:px-8 md:pb-8"><AuthGuard>{children}</AuthGuard></main>
+          <main className="min-w-0 w-full px-4 pb-safe-bottom pt-5 sm:px-6 md:px-8 md:pb-10 md:pt-8 xl:px-10"><AuthGuard>{children}</AuthGuard></main>
         </div>
       </body>
     </html>
