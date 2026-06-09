@@ -15,6 +15,7 @@ function aplicarTema(tema: TemaSpendFlow) {
   document.documentElement.dataset.theme = tema;
   document.documentElement.style.colorScheme = tema === 'dark-modern' ? 'dark' : 'light';
   window.localStorage.setItem(CLAVE_TEMA, tema);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', tema === 'dark-modern' ? '#0B0F14' : '#F5F7FB');
 }
 
 export function SelectorTema({ compacto = false }: { compacto?: boolean }) {
