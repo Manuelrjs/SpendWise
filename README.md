@@ -470,4 +470,4 @@ SpendFlow Planner usa **Moderno oscuro** (`dark-modern`) como tema predeterminad
 
 La preferencia se guarda únicamente en `localStorage` con la clave `spendflow-theme`; no requiere tablas, migraciones ni cambios en Supabase. Al iniciar, el layout aplica el tema guardado sobre `data-theme` en el elemento `html` antes de mostrar la interfaz para reducir el parpadeo.
 
-Para probar la experiencia PWA en iPhone, abrir la aplicación en Safari, alternar el tema, agregarla a la pantalla de inicio y volver a abrirla. Verificar que se conserve la apariencia elegida, que la barra inferior permita acceder a Inicio, Gastos, Nuevo gasto, Flujo y Tarjetas, y que ningún contenido quede debajo del área segura inferior.
+Para probar la experiencia PWA en iPhone, abrir la aplicación en Safari, alternar el tema, agregarla a la pantalla de inicio y volver a abrirla. Verificar que se conserve la apariencia elegida, que la barra inferior permita acceder a Inicio, Nuevo, Gastos, Flujo y Más; y que Más abra todas las opciones secundarias y que ningún contenido quede debajo del área segura inferior.

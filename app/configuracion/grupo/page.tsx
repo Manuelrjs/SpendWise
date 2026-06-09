@@ -189,7 +189,7 @@ export default function GrupoPage() {
 
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-lg">◎</span><div><p className="sf-kicker">Contexto actual</p><h2 className="text-lg font-semibold">Grupo activo</h2></div></div>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2"><div><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Nombre</p><p className="mt-1 font-medium">{perfil?.grupo_nombre ?? 'Grupo activo'}</p></div><div><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Mi rol</p><p className="mt-1 font-medium">{etiquetaRol(perfil?.rol ?? 'miembro')}</p></div></div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2"><div><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Nombre</p><p className="mt-1 font-medium">{perfil?.grupo_nombre ?? 'Grupo activo'}</p></div><div><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Mi rol</p><p className="mt-1 font-medium">Tu rol: {etiquetaRol(perfil?.rol ?? 'miembro')}</p></div></div>
       <div className="mt-4 max-w-sm"><SelectorGrupoActivo mostrarTitulo onError={manejarErrorSelector} /></div>
     </article>
 
