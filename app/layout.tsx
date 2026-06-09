@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { NavegacionPrincipal } from '@/components/navegacion-principal';
 import { AuthGuard } from '@/components/auth-guard';
+import { SelectorTema } from '@/components/selector-tema';
 
 export const metadata: Metadata = {
   title: 'SpendFlow Planner',
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: 'SpendFlow',
-    statusBarStyle: 'default',
+    statusBarStyle: 'black-translucent',
   },
   icons: {
     apple: '/apple-icon',
@@ -19,18 +20,24 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#059669',
+  themeColor: '#0F0F14',
   viewportFit: 'cover',
 };
 
+const scriptTema = `(function(){try{var t=localStorage.getItem('spendflow-theme');if(t!=='light-classic'&&t!=='dark-modern')t='dark-modern';document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t==='dark-modern'?'dark':'light'}catch(e){document.documentElement.dataset.theme='dark-modern'}})()`;
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es">
+    <html lang="es" data-theme="dark-modern" suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: scriptTema }} /></head>
       <body>
-        <div className="min-h-screen md:flex">
-          <NavegacionPrincipal />
-          <main className="min-w-0 w-full px-4 pb-safe-bottom pt-5 sm:px-6 md:px-8 md:pb-10 md:pt-8 xl:px-10"><AuthGuard>{children}</AuthGuard></main>
-        </div>
+        <AuthGuard>
+          <div className="sf-app-shell">
+            <NavegacionPrincipal />
+            <main className="sf-main">{children}</main>
+            <div className="sf-public-theme"><SelectorTema compacto /></div>
+          </div>
+        </AuthGuard>
       </body>
     </html>
   );

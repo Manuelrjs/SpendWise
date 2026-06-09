@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
+import { useAuthSpendWise } from '@/components/auth-context';
+import { SelectorTema } from '@/components/selector-tema';
 
 type IconoNombre = 'inicio' | 'nuevo' | 'gastos' | 'reportes' | 'tarjetas' | 'calendario' | 'flujo' | 'cuotas' | 'grupo' | 'personas' | 'categorias' | 'pagos' | 'ajustes';
 
@@ -31,7 +32,7 @@ const gruposEnlaces: GrupoEnlaces[] = [
   ] },
 ];
 
-const enlacesMoviles = [gruposEnlaces[0].enlaces[0], gruposEnlaces[0].enlaces[1], gruposEnlaces[0].enlaces[2], gruposEnlaces[0].enlaces[3], gruposEnlaces[2].enlaces[0]];
+const enlacesMoviles = [gruposEnlaces[0].enlaces[0], gruposEnlaces[0].enlaces[2], gruposEnlaces[0].enlaces[1], gruposEnlaces[0].enlaces[3], gruposEnlaces[1].enlaces[0]];
 
 function Icono({ nombre }: { nombre: IconoNombre }) {
   const trazos: Record<IconoNombre, React.ReactNode> = {
@@ -53,42 +54,42 @@ function Icono({ nombre }: { nombre: IconoNombre }) {
 }
 
 function LogoMarca() {
-  return <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-700 text-white shadow-lg shadow-emerald-900/20"><Icono nombre="flujo" /></span>;
+  return <span className="sf-brand-mark"><Icono nombre="flujo" /></span>;
 }
 
 export function NavegacionPrincipal() {
   const pathname = usePathname();
   const router = useRouter();
+  const { session, perfil, cerrarSesion: cerrarSesionAuth } = useAuthSpendWise();
   if (pathname === '/login' || pathname === '/registro' || pathname === '/aceptar-invitacion') return null;
 
   const estaActivo = (href: string) => href === '/' ? pathname === '/' : pathname.startsWith(href);
-  const cerrarSesion = async () => { await supabase.auth.signOut(); router.replace('/login'); };
+  const cerrarSesion = async () => { await cerrarSesionAuth(); router.replace('/login'); };
+  const nombreGrupo = perfil?.grupo_nombre ?? 'Preparando grupo...';
+  const email = session?.user.email ?? 'Sesión activa';
 
   return <>
-    <aside className="hidden md:sticky md:top-0 md:flex md:h-screen md:w-72 md:shrink-0 md:flex-col md:border-r md:border-slate-200/80 md:bg-white/95 md:shadow-[8px_0_30px_rgba(15,23,42,0.03)] md:backdrop-blur">
-      <div className="border-b border-slate-100 px-5 py-5">
-        <div className="flex items-center gap-3"><LogoMarca /><div><p className="font-bold tracking-tight text-slate-950">SpendFlow Planner</p><p className="text-xs text-slate-500">Control y flujo futuro</p></div></div>
-        <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3">
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-700">Tu planificación</p>
-          <p className="mt-1 text-sm font-semibold text-slate-900">Anticipá tu flujo mensual</p>
-          <p className="mt-1 text-xs leading-5 text-slate-500">Gastos, tarjetas y cuotas en un solo lugar.</p>
-        </div>
+    <aside className="sf-sidebar">
+      <div className="sf-sidebar-brand">
+        <div className="sf-brand"><LogoMarca /><div><p>SpendFlow Planner</p><span>Control y flujo futuro</span></div></div>
+        <div className="sf-context-card"><span>Grupo activo</span><strong>{nombreGrupo}</strong><small>{email}</small></div>
       </div>
-      <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
-        {gruposEnlaces.map((grupo) => <div key={grupo.titulo} className="mb-5">
-          <p className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">{grupo.titulo}</p>
-          <div className="space-y-1">{grupo.enlaces.map((enlace) => <Link key={enlace.href} href={enlace.href} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${estaActivo(enlace.href) ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/15' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'}`}><Icono nombre={enlace.icono} /><span>{enlace.etiqueta}</span></Link>)}</div>
+      <nav className="sf-sidebar-nav">
+        {gruposEnlaces.map((grupo) => <div key={grupo.titulo} className="sf-nav-group">
+          <p>{grupo.titulo}</p>
+          <div>{grupo.enlaces.map((enlace) => <Link key={enlace.href} href={enlace.href} className={`sf-nav-link ${estaActivo(enlace.href) ? 'is-active' : ''}`}><Icono nombre={enlace.icono} /><span>{enlace.etiqueta}</span></Link>)}</div>
         </div>)}
       </nav>
-      <div className="border-t border-slate-100 p-3"><button onClick={cerrarSesion} className="flex w-full items-center justify-center rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition hover:bg-rose-50 hover:text-rose-700">Cerrar sesión</button></div>
+      <div className="sf-sidebar-footer"><SelectorTema /><button onClick={cerrarSesion} className="sf-signout">Cerrar sesión</button></div>
     </aside>
 
-    <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/90 px-4 pb-3 pt-safe-top backdrop-blur-xl md:hidden">
-      <div className="flex h-14 items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-2.5"><LogoMarca /><div className="min-w-0"><p className="truncate text-sm font-bold text-slate-950">SpendFlow Planner</p><p className="truncate text-xs text-slate-500">Control y flujo futuro</p></div></div><button onClick={cerrarSesion} className="rounded-lg px-2 py-2 text-xs font-semibold text-slate-500">Salir</button></div>
+    <header className="sf-mobile-header">
+      <div className="sf-brand"><LogoMarca /><div><p>SpendFlow</p><span>{nombreGrupo}</span></div></div>
+      <div className="sf-mobile-actions"><SelectorTema compacto /><button onClick={cerrarSesion}>Salir</button></div>
     </header>
 
-    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/80 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur-xl md:hidden">
-      <ul className="grid grid-cols-5 gap-1">{enlacesMoviles.map((enlace) => <li key={enlace.href}><Link href={enlace.href} className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 text-[10px] font-semibold transition ${estaActivo(enlace.href) ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500'}`}><Icono nombre={enlace.icono} /><span className="max-w-full truncate">{enlace.etiqueta}</span></Link></li>)}</ul>
+    <nav className="sf-bottom-nav">
+      <ul>{enlacesMoviles.map((enlace) => <li key={enlace.href}><Link href={enlace.href} className={estaActivo(enlace.href) ? 'is-active' : ''}><Icono nombre={enlace.icono} /><span>{enlace.etiqueta}</span></Link></li>)}</ul>
     </nav>
   </>;
 }
