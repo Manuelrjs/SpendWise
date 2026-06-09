@@ -463,3 +463,11 @@ Las invitaciones pendientes muestran rol, estado, creación, expiración y link 
 6. Entrar como miembro no admin y confirmar que puede ver miembros pero no ve controles de administración; las llamadas directas a los RPC deben ser rechazadas.
 7. Crear otra invitación con Usuario 1, cancelarla y abrir su link. Debe mostrarse como no disponible.
 8. Alternar entre dos grupos activos y confirmar que `perfiles.grupo_id`, `perfiles.rol` y las pantallas cambian al contexto seleccionado.
+
+## Temas visuales (Tarea 35B)
+
+SpendFlow Planner usa **Moderno oscuro** (`dark-modern`) como tema predeterminado y ofrece **Claro clásico** (`light-classic`) como alternativa. El selector está disponible en la navegación principal y también en las pantallas públicas de acceso.
+
+La preferencia se guarda únicamente en `localStorage` con la clave `spendflow-theme`; no requiere tablas, migraciones ni cambios en Supabase. Al iniciar, el layout aplica el tema guardado sobre `data-theme` en el elemento `html` antes de mostrar la interfaz para reducir el parpadeo.
+
+Para probar la experiencia PWA en iPhone, abrir la aplicación en Safari, alternar el tema, agregarla a la pantalla de inicio y volver a abrirla. Verificar que se conserve la apariencia elegida, que la barra inferior permita acceder a Inicio, Gastos, Nuevo gasto, Flujo y Tarjetas, y que ningún contenido quede debajo del área segura inferior.
