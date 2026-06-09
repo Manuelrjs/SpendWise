@@ -80,7 +80,7 @@ function formatearMonto(monto: number) {
 }
 
 function badgeBase() {
-  return 'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-slate-50 text-slate-700 border-slate-200';
+  return 'sf-badge sf-badge-neutral';
 }
 
 function formatearPeriodoLargo(periodo: string) {
@@ -330,7 +330,7 @@ export default function DashboardPage() {
               type="button"
               onClick={reintentarDashboard}
               disabled={cargando}
-              className="mt-2 rounded-lg border border-rose-300 bg-white px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-2 rounded-lg border border-rose-300 bg-[var(--surface)] px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {cargando ? 'Reintentando...' : 'Reintentar dashboard'}
             </button>
@@ -359,7 +359,7 @@ export default function DashboardPage() {
       </div>
 
       {detalleCuotasAbierto ? (
-        <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <article className="sf-card p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-slate-900">Cuotas pendientes de {formatearPeriodoLargo(mesSeleccionado)}</h2>
@@ -380,7 +380,7 @@ export default function DashboardPage() {
                   </div>
                   <ul className="space-y-2">
                     {grupo.cuotas.map((cuota) => (
-                      <li key={cuota.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-sm">
+                      <li key={cuota.id} className="sf-progress-row text-sm">
                         <div className="grid gap-1 sm:grid-cols-2">
                           <p><span className="font-medium">Establecimiento:</span> {cuota.establecimiento}</p>
                           <p><span className="font-medium">Descripción:</span> {cuota.descripcion_cuota}</p>
@@ -418,10 +418,10 @@ function SkeletonDashboard() {
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {['Gastos del mes', 'Tarjetas a reservar', 'Próximo mes', 'Movimientos'].map((titulo) => (
-        <article key={titulo} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="h-3 w-28 animate-pulse rounded-full bg-slate-200" />
-          <div className="mt-3 h-7 w-36 animate-pulse rounded-full bg-slate-200" />
-          <div className="mt-3 h-3 w-24 animate-pulse rounded-full bg-slate-100" />
+        <article key={titulo} className="sf-metric-card">
+          <div className="h-3 w-28 animate-pulse rounded-full bg-[var(--surface-3)]" />
+          <div className="mt-3 h-7 w-36 animate-pulse rounded-full bg-[var(--surface-3)]" />
+          <div className="mt-3 h-3 w-24 animate-pulse rounded-full bg-[var(--surface-3)]" />
         </article>
       ))}
     </div>
@@ -432,33 +432,38 @@ function CardMetrica({ titulo, valor, subtitulo, esInteractiva = false, onClick 
   return (
     <article
       onClick={onClick}
-      className={`group relative min-h-36 overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_10px_35px_rgba(15,37,53,0.06)] transition before:absolute before:inset-x-0 before:top-0 before:h-1 before:bg-gradient-to-r before:from-emerald-500 before:to-teal-500 ${esInteractiva ? 'cursor-pointer hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-lg' : 'hover:-translate-y-0.5'}`}
+      className={`sf-metric-card ${esInteractiva ? 'is-interactive' : ''}`}
       role={esInteractiva ? 'button' : undefined}
       tabIndex={esInteractiva ? 0 : undefined}
       onKeyDown={esInteractiva ? (e) => { if (e.key === 'Enter' || e.key === ' ') onClick?.(); } : undefined}
     >
-      <div className="mb-5 flex items-start justify-between gap-3"><p className="text-sm font-semibold text-slate-600">{titulo}</p><span className="h-2.5 w-2.5 rounded-full bg-emerald-400 ring-4 ring-emerald-50" /></div>
-      <p className="break-words text-2xl font-bold tracking-tight text-slate-950 sm:text-[1.7rem]">{valor}</p>
-      <p className="mt-1.5 text-xs leading-5 text-slate-500">{subtitulo}</p>
+      <div className="mb-5 flex items-start justify-between gap-3"><p className="text-sm font-semibold text-[var(--text2)]">{titulo}</p><span className="sf-metric-indicator" /></div>
+      <p className="break-words text-2xl font-bold tracking-tight text-[var(--text1)] sm:text-[1.7rem]">{valor}</p>
+      <p className="mt-1.5 text-xs leading-5 text-[var(--text3)]">{subtitulo}</p>
     </article>
   );
 }
 
+const coloresProgreso = ['var(--accent)', 'var(--accent2)', 'var(--danger)', 'var(--warning)', 'var(--purple)'];
+
 function CardListado({ titulo, filas, vacio }: { titulo: string; filas: FilaResumen[]; vacio: string }) {
+  const maximo = Math.max(...filas.map((fila) => fila.total), 1);
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <h2 className="text-base font-semibold text-slate-900">{titulo}</h2>
+    <article className="sf-list-panel">
+      <h2 className="text-base font-semibold text-[var(--text1)]">{titulo}</h2>
       {filas.length === 0 ? (
         <div className="sf-empty mt-4 py-6">{vacio}</div>
       ) : (
         <ul className="mt-3 space-y-2">
-          {filas.map((fila) => (
-            <li key={fila.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 p-2">
-              <div className="flex min-w-0 flex-col gap-1">
-                <p className="truncate text-sm font-medium text-slate-800">{fila.nombre}</p>
-                <span className={badgeBase()}>{fila.cantidad} mov.</span>
+          {filas.map((fila, indice) => (
+            <li key={fila.id} className="sf-progress-row">
+              <div className="sf-progress-row-head">
+                <div className="min-w-0"><p className="truncate text-sm font-semibold text-[var(--text1)]">{fila.nombre}</p><span className="sf-badge sf-badge-neutral mt-1.5">{fila.cantidad} mov.</span></div>
+                <p className="shrink-0 text-sm font-bold text-[var(--text1)]">{formatearMonto(fila.total)}</p>
               </div>
-              <p className="text-sm font-semibold text-slate-900">{formatearMonto(fila.total)}</p>
+              <div className="sf-progress-track" aria-label={`${fila.nombre}: ${Math.round((fila.total / maximo) * 100)}% del mayor total`}>
+                <div className="sf-progress-fill" style={{ width: `${Math.max((fila.total / maximo) * 100, 2)}%`, '--progress-color': coloresProgreso[indice % coloresProgreso.length] } as React.CSSProperties} />
+              </div>
             </li>
           ))}
         </ul>

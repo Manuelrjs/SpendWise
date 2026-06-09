@@ -255,14 +255,14 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
                 type="button"
                 onClick={() => void reintentarPerfil()}
                 disabled={perfilLoading}
-                className="rounded-xl border border-rose-300 bg-white px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-xl border border-rose-300 bg-[var(--surface)] px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {perfilLoading ? 'Reintentando...' : 'Reintentar'}
               </button>
               <button
                 type="button"
                 onClick={() => void cerrarSesion()}
-                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                className="rounded-xl border border-slate-300 bg-[var(--surface)] px-3 py-2 text-xs font-medium text-slate-700 hover:bg-[var(--surface-3)]"
               >
                 Cerrar sesión
               </button>
@@ -273,7 +273,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
           </div>
         ) : null}
         {perfil?.email && !esRutaPublica ? (
-          <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-white/80 bg-white/75 p-3 text-xs text-slate-600 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
+          <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-slate-600 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
             <div className="flex min-w-0 items-center gap-3"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500 ring-4 ring-emerald-50" /><p className="truncate"><span className="font-semibold text-slate-900">{perfil.grupo_nombre ?? 'Grupo activo'}</span><span className="mx-2 text-slate-300">/</span>{perfil.email}</p></div>
             <div className="w-full sm:w-64"><SelectorGrupoActivo /></div>
           </div>
@@ -295,11 +295,11 @@ function PantallaCargaInicial({
 }) {
   return (
     <div className="flex min-h-[60vh] items-center justify-center p-6">
-      <section className="w-full max-w-md rounded-3xl border border-emerald-100 bg-white p-6 text-center shadow-sm">
+      <section className="w-full max-w-md rounded-3xl border border-emerald-100 bg-[var(--surface)] p-6 text-center shadow-sm">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-2xl">💸</div>
         <h1 className="mt-4 text-xl font-semibold text-slate-900">Preparando SpendFlow Planner...</h1>
         <p className="mt-2 text-sm text-slate-600">Cargando tu grupo y datos iniciales...</p>
-        <div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-100">
+        <div className="mt-5 h-2 overflow-hidden rounded-full bg-[var(--surface-3)]">
           <div className="h-full w-2/3 animate-pulse rounded-full bg-emerald-500" />
         </div>
         {mostrarAvisoConexion ? (

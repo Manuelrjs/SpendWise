@@ -285,7 +285,7 @@ export default function Page() {
       {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</p>}
       {mensaje && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{mensaje}</p>}
       <div className="grid gap-4 lg:grid-cols-2">
-        <form onSubmit={guardar} className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
+        <form onSubmit={guardar} className="space-y-3 rounded-2xl border bg-[var(--surface)] p-4 shadow-sm">
           <h2 className="font-semibold">Nueva carga manual</h2>
           <label className="block text-sm font-medium">Monto de cada cuota<input value={formulario.monto_cuota} onChange={(e) => setFormulario((p) => ({ ...p, monto_cuota: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-3 text-xl font-semibold" /></label>
           <p className="-mt-2 text-xs text-slate-500">Importe que corresponde pagar por cada cuota pendiente.</p>
@@ -312,18 +312,18 @@ export default function Page() {
           <button disabled={guardando} className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white">{guardando ? 'Guardando...' : 'Guardar carga inicial'}</button>
         </form>
 
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border bg-[var(--surface)] p-4 shadow-sm">
           <h2 className="font-semibold">Vista previa editable</h2>
-          {vistaPrevia.length === 0 ? <p className="mt-2 text-sm text-slate-500">Completá los campos requeridos para ver las cuotas que se generarán.</p> : <ul className="mt-2 space-y-2">{vistaPrevia.map((fila, idx) => <li key={fila.numero} className="rounded-xl bg-slate-50 p-3 text-sm"><p className="font-medium">{fila.numero}/{formulario.total_cuotas} · {new Intl.NumberFormat('es-AR', { style: 'currency', currency: formulario.moneda || 'ARS' }).format(fila.monto)}</p><label className="mt-1 block text-xs text-slate-600">Período estimado<input value={fila.periodo} onChange={(e) => setPeriodosVistaPrevia((prev) => prev.map((v, index) => index === idx ? e.target.value : v))} className="mt-1 w-full rounded-lg border px-2 py-1 text-sm" /></label></li>)}</ul>}
+          {vistaPrevia.length === 0 ? <p className="mt-2 text-sm text-slate-500">Completá los campos requeridos para ver las cuotas que se generarán.</p> : <ul className="mt-2 space-y-2">{vistaPrevia.map((fila, idx) => <li key={fila.numero} className="rounded-xl bg-[var(--surface-2)] p-3 text-sm"><p className="font-medium">{fila.numero}/{formulario.total_cuotas} · {new Intl.NumberFormat('es-AR', { style: 'currency', currency: formulario.moneda || 'ARS' }).format(fila.monto)}</p><label className="mt-1 block text-xs text-slate-600">Período estimado<input value={fila.periodo} onChange={(e) => setPeriodosVistaPrevia((prev) => prev.map((v, index) => index === idx ? e.target.value : v))} className="mt-1 w-full rounded-lg border px-2 py-1 text-sm" /></label></li>)}</ul>}
         </div>
       </div>
 
-      <div className="rounded-2xl border bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border bg-[var(--surface)] p-4 shadow-sm">
         <h2 className="mb-3 font-semibold">Cargas iniciales registradas</h2>
         <div className="hidden overflow-x-auto md:block">
           <table className="min-w-full text-xs">
             <thead>
-              <tr className="border-b bg-slate-50 text-left">
+              <tr className="border-b bg-[var(--surface-2)] text-left">
                 <th className="px-2 py-1">Establecimiento</th><th className="px-2 py-1">Descripción</th><th className="px-2 py-1">Cuenta</th><th className="px-2 py-1">Tarjeta física</th><th className="px-2 py-1">Persona</th><th className="px-2 py-1">Categoría</th><th className="px-2 py-1">Cuota inicial/total</th><th className="px-2 py-1">Período inicio</th><th className="px-2 py-1">Monto cuota</th><th className="px-2 py-1">Estado</th><th className="px-2 py-1">Acciones</th>
               </tr>
             </thead>
@@ -342,7 +342,7 @@ export default function Page() {
               <div className="overflow-x-auto">
                 <table className="min-w-full text-xs">
                   <thead>
-                    <tr className="border-b bg-slate-50 text-left">
+                    <tr className="border-b bg-[var(--surface-2)] text-left">
                       <th className="px-2 py-1 font-medium">Cuota</th>
                       <th className="px-2 py-1 font-medium">Período</th>
                       <th className="px-2 py-1 font-medium">Monto</th>
@@ -354,7 +354,7 @@ export default function Page() {
                   <tbody>
                     {cuotasPorCompra[compra.id].slice(0, mostrarTodasCuotas[compra.id] || cuotasPorCompra[compra.id].length <= 10 ? undefined : 10).map((cuota) => <tr key={cuota.id} className="border-b align-top">
                       <td className="px-2 py-1">{cuota.numero_cuota}/{cuota.total_cuotas}</td>
-                      <td className="px-2 py-1">{compraEditandoId === compra.id && ESTADOS_EDITABLES.has(cuota.estado) ? <div className="space-y-1"><input value={periodosEdicionCuotas[cuota.id] ?? cuota.periodo_pago_estimado} onChange={(e) => setPeriodosEdicionCuotas((prev) => ({ ...prev, [cuota.id]: e.target.value }))} className="w-24 rounded border px-1 py-0.5" />{(periodosEdicionCuotas[cuota.id] ?? cuota.periodo_pago_estimado) !== cuota.periodo_pago_estimado ? <p className="text-[10px] text-amber-700">Modificado manualmente</p> : null}</div> : <span className="inline-flex rounded bg-slate-100 px-2 py-0.5">{cuota.periodo_pago_estimado}</span>}</td>
+                      <td className="px-2 py-1">{compraEditandoId === compra.id && ESTADOS_EDITABLES.has(cuota.estado) ? <div className="space-y-1"><input value={periodosEdicionCuotas[cuota.id] ?? cuota.periodo_pago_estimado} onChange={(e) => setPeriodosEdicionCuotas((prev) => ({ ...prev, [cuota.id]: e.target.value }))} className="w-24 rounded border px-1 py-0.5" />{(periodosEdicionCuotas[cuota.id] ?? cuota.periodo_pago_estimado) !== cuota.periodo_pago_estimado ? <p className="text-[10px] text-amber-700">Modificado manualmente</p> : null}</div> : <span className="inline-flex rounded bg-[var(--surface-3)] px-2 py-0.5">{cuota.periodo_pago_estimado}</span>}</td>
                       <td className="px-2 py-1">{new Intl.NumberFormat('es-AR', { style: 'currency', currency: cuota.moneda }).format(cuota.monto_cuota)}</td>
                       <td className="px-2 py-1">{cuota.estado}</td>
                       <td className="px-2 py-1">{cuota.origen_cuota ?? '-'}</td>
