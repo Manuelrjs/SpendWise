@@ -482,7 +482,7 @@ export default function FlujoPage() {
         <CardTitulo titulo="Cuotas pendientes visibles" valor={String(cuotasPendientesVisibles)} />
       </div>
 
-      <div className="grid grid-cols-1 gap-2 rounded-2xl border bg-white p-3 md:grid-cols-6">
+      <div className="grid grid-cols-1 gap-2 rounded-2xl border bg-[var(--surface)] p-3 md:grid-cols-6">
         <input type="month" value={filtros.mesInicial} onChange={(e) => setFiltros((p) => ({ ...p, mesInicial: e.target.value }))} className="rounded-xl border px-3 py-2 text-sm" />
         <select value={filtros.cantidadMeses} onChange={(e) => setFiltros((p) => ({ ...p, cantidadMeses: Number(e.target.value) as 3 | 6 | 12 }))} className="rounded-xl border px-3 py-2 text-sm">
           <option value={3}>3 meses</option>
@@ -506,7 +506,7 @@ export default function FlujoPage() {
           {mediosPago.filter((medio) => medio.tipo !== 'tarjeta_credito').map((medio) => <option key={medio.id} value={medio.id}>{medio.nombre}</option>)}
         </select>
       </div>
-      <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-medium text-slate-700">
+      <label className="flex items-center gap-2 rounded-xl border bg-[var(--surface)] px-3 py-2 text-sm font-medium text-slate-700">
         <input
           type="checkbox"
           checked={mostrarDesglose}
@@ -517,23 +517,23 @@ export default function FlujoPage() {
       </label>
       {mostrarDesglose && (
         <div className="flex gap-2">
-          <button onClick={expandirTodo} className="rounded-lg border bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50">Expandir todo</button>
-          <button onClick={contraerTodo} className="rounded-lg border bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50">Contraer todo</button>
+          <button onClick={expandirTodo} className="rounded-lg border bg-[var(--surface)] px-3 py-1.5 text-sm font-medium hover:bg-[var(--surface-2)]">Expandir todo</button>
+          <button onClick={contraerTodo} className="rounded-lg border bg-[var(--surface)] px-3 py-1.5 text-sm font-medium hover:bg-[var(--surface-2)]">Contraer todo</button>
         </div>
       )}
 
       {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700"><p>{error}</p>{process.env.NODE_ENV !== 'production' && errorTecnico ? <details className="mt-2"><summary className="cursor-pointer font-medium">Ver error técnico</summary><pre className="mt-2 whitespace-pre-wrap break-words text-xs">{errorTecnico}</pre></details> : null}</div>}
-      {cargando && <p className="rounded-xl border bg-white px-3 py-2 text-sm">Cargando flujo mensual...</p>}
+      {cargando && <p className="rounded-xl border bg-[var(--surface)] px-3 py-2 text-sm">Cargando flujo mensual...</p>}
 
       {!cargando && !error && cuentasVisibles.length === 0 && mediosPagoVisibles.length === 0 && (
-        <p className="rounded-xl border bg-white px-3 py-3 text-sm">Todavía no hay salidas proyectadas para este período.</p>
+        <p className="rounded-xl border bg-[var(--surface)] px-3 py-3 text-sm">Todavía no hay salidas proyectadas para este período.</p>
       )}
 
       {!cargando && !error && (cuentasVisibles.length > 0 || mediosPagoVisibles.length > 0) && (
         <>
-          <div className="hidden overflow-x-auto rounded-2xl border bg-white md:block">
+          <div className="hidden overflow-x-auto rounded-2xl border bg-[var(--surface)] md:block">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left">
+              <thead className="bg-[var(--surface-2)] text-left">
                 <tr>
                   <th className="min-w-[320px] px-3 py-2 font-semibold">Cuenta / Compra</th>
                   <th className="px-3 py-2 font-semibold">Cuotas</th>
@@ -552,7 +552,7 @@ export default function FlujoPage() {
                   return <Fragment key={medio.id}>
                   <tr key={medio.id} className="border-t bg-amber-50/40">
                     <td className="px-3 py-2 font-semibold">
-                      <button onClick={() => alternarFila(claveFila)} disabled={!mostrarDesglose} className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-white text-xs disabled:opacity-40">{filaExpandida ? '−' : '+'}</button>
+                      <button onClick={() => alternarFila(claveFila)} disabled={!mostrarDesglose} className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-[var(--surface)] text-xs disabled:opacity-40">{filaExpandida ? '−' : '+'}</button>
                       Gasto directo · {medio.nombre}
                     </td>
                     <td className="px-3 py-2 text-slate-400">—</td>
@@ -561,7 +561,7 @@ export default function FlujoPage() {
                     {periodos.map((periodo) => {
                       const monto = matrizGastosDirectos.get(medio.id)?.get(periodo) ?? 0;
                       const activa = celdaActiva?.tipo === 'gasto_directo' && celdaActiva.clave === medio.id && celdaActiva.periodo === periodo;
-                      return <td key={periodo} className="px-3 py-2 text-right tabular-nums"><button onClick={() => manejarClickCelda('gasto_directo', medio.id, periodo, monto)} className={`w-full rounded-lg px-2 py-1 text-right transition ${activa ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300' : 'hover:bg-slate-100'}`} disabled={monto <= 0}>{monto > 0 ? formatearMonto(monto, 'ARS') : '—'}</button></td>;
+                      return <td key={periodo} className="px-3 py-2 text-right tabular-nums"><button onClick={() => manejarClickCelda('gasto_directo', medio.id, periodo, monto)} className={`w-full rounded-lg px-2 py-1 text-right transition ${activa ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300' : 'hover:bg-[var(--surface-3)]'}`} disabled={monto <= 0}>{monto > 0 ? formatearMonto(monto, 'ARS') : '—'}</button></td>;
                     })}
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatearMonto(totalMedio, 'ARS')}</td>
                   </tr>
@@ -591,7 +591,7 @@ export default function FlujoPage() {
                     <Fragment key={cuenta.id}>
                     <tr key={cuenta.id} className="border-t">
                         <td className="px-3 py-2 font-semibold">
-                          <button onClick={() => alternarFila(claveFila)} disabled={!mostrarDesglose || gruposCuenta.length === 0} className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-white text-xs disabled:opacity-40">{filaExpandida ? '−' : '+'}</button>
+                          <button onClick={() => alternarFila(claveFila)} disabled={!mostrarDesglose || gruposCuenta.length === 0} className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-[var(--surface)] text-xs disabled:opacity-40">{filaExpandida ? '−' : '+'}</button>
                           {cuenta.nombre_cuenta}
                         </td>
                         <td className="px-3 py-2 text-slate-400">—</td>
@@ -604,7 +604,7 @@ export default function FlujoPage() {
                             <td key={periodo} className="px-3 py-2 text-right tabular-nums">
                               <button
                                 onClick={() => manejarClickCelda('tarjeta', cuenta.id, periodo, monto)}
-                                className={`w-full rounded-lg px-2 py-1 text-right transition ${activa ? 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300' : 'hover:bg-slate-100'}`}
+                                className={`w-full rounded-lg px-2 py-1 text-right transition ${activa ? 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300' : 'hover:bg-[var(--surface-3)]'}`}
                                 disabled={monto <= 0}
                               >
                                 {monto > 0 ? formatearMonto(monto, 'ARS') : '—'}
@@ -616,12 +616,12 @@ export default function FlujoPage() {
                     </tr>
                       {filaExpandida && gruposCuenta.map((grupo) => {
                         const totalGrupo = periodos.reduce((acc, periodo) => acc + (grupo.montosPorPeriodo.get(periodo) ?? 0), 0);
-                        return <tr key={grupo.clave} className="border-t bg-slate-50/60 align-top">
+                        return <tr key={grupo.clave} className="border-t bg-[var(--surface-2)]/60 align-top">
                           <td className="px-3 py-2 pl-8">
                             <p className="font-semibold">{grupo.establecimiento}</p>
                             <p className="text-slate-600">{grupo.descripcion}</p>
                             <p className="text-slate-500">Persona: {grupo.personaId ? nombresPersonas.get(grupo.personaId) ?? 'Sin persona' : 'Sin persona'} · Tarjeta: {grupo.tarjetaFisicaId ? nombresTarjetas.get(grupo.tarjetaFisicaId) ?? 'Sin tarjeta' : 'Sin tarjeta'}</p>
-                            <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-xs ${BADGE_ORIGEN[grupo.origen] ?? 'bg-slate-50 text-slate-700 border-slate-200'}`}>origen: {grupo.origen}</span>
+                            <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-xs ${BADGE_ORIGEN[grupo.origen] ?? 'bg-[var(--surface-2)] text-slate-700 border-slate-200'}`}>origen: {grupo.origen}</span>
                           </td>
                           <td className="px-3 py-2">{grupo.cuotasPendientes}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{formatearMonto(grupo.montoCuotaReferencia, grupo.moneda)}</td>
@@ -637,7 +637,7 @@ export default function FlujoPage() {
                   );
                 })}
               </tbody>
-              <tfoot className="border-t bg-slate-50 font-semibold">
+              <tfoot className="border-t bg-[var(--surface-2)] font-semibold">
                 <tr>
                   <td className="px-3 py-2">Total a reservar</td>
                   <td />
@@ -655,7 +655,7 @@ export default function FlujoPage() {
               <article key={medio.id} className="rounded-2xl border bg-amber-50/50 p-3">
                 <button disabled={!mostrarDesglose} onClick={() => alternarFila(`medio:${medio.id}`)} className="flex w-full items-center justify-between text-left">
                   <h3 className="font-semibold">Gasto directo · {medio.nombre}</h3>
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded border bg-white text-xs">{mostrarDesglose && filasExpandidas[`medio:${medio.id}`] ? '−' : '+'}</span>
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded border bg-[var(--surface)] text-xs">{mostrarDesglose && filasExpandidas[`medio:${medio.id}`] ? '−' : '+'}</span>
                 </button>
                 <div className="mt-2 space-y-2">
                   {periodos.map((periodo) => {
@@ -666,7 +666,7 @@ export default function FlujoPage() {
                 {mostrarDesglose && filasExpandidas[`medio:${medio.id}`] && (
                   <div className="mt-3 space-y-2">
                     {gastosDirectosFiltrados.filter((gasto) => gasto.medio_pago_id === medio.id).map((gasto) => (
-                      <article key={gasto.id} className="rounded-xl border bg-white p-2 text-xs">
+                      <article key={gasto.id} className="rounded-xl border bg-[var(--surface)] p-2 text-xs">
                         <p className="font-semibold">{gasto.establecimiento}</p>
                         <p className="text-slate-600">{gasto.descripcion ?? 'Sin descripción'}</p>
                         <p className="text-slate-500">{gasto.fecha_gasto.slice(0, 10)} · {gasto.categoria?.nombre ?? 'Sin categoría'} · {formatearMonto(gasto.monto, gasto.moneda)}</p>
@@ -677,10 +677,10 @@ export default function FlujoPage() {
               </article>
             ))}
             {cuentasVisibles.map((cuenta) => (
-              <article key={cuenta.id} className="rounded-2xl border bg-white p-3">
+              <article key={cuenta.id} className="rounded-2xl border bg-[var(--surface)] p-3">
                 <button disabled={!mostrarDesglose} onClick={() => alternarFila(`cuenta:${cuenta.id}`)} className="flex w-full items-center justify-between text-left">
                   <h3 className="font-semibold">{cuenta.nombre_cuenta}</h3>
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded border bg-white text-xs">{mostrarDesglose && filasExpandidas[`cuenta:${cuenta.id}`] ? '−' : '+'}</span>
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded border bg-[var(--surface)] text-xs">{mostrarDesglose && filasExpandidas[`cuenta:${cuenta.id}`] ? '−' : '+'}</span>
                 </button>
                 <div className="mt-2 space-y-2">
                   {periodos.map((periodo) => {
@@ -690,7 +690,7 @@ export default function FlujoPage() {
                 </div>
                 {mostrarDesglose && filasExpandidas[`cuenta:${cuenta.id}`] && (
                   <div className="mt-3 space-y-3">
-                    {(desglosePorCuenta.get(cuenta.id) ?? []).map((grupo) => (<article key={grupo.clave} className="rounded-xl border bg-slate-50 p-2 text-xs"><p className="font-semibold">{grupo.establecimiento}</p><p className="text-slate-600">{grupo.descripcion} · {grupo.cuotasPendientes}</p><div className="mt-1 grid grid-cols-2 gap-1">{periodos.map((periodo) => <div key={periodo} className="rounded border bg-white px-2 py-1"><p className="text-[11px] text-slate-500">{periodo}</p><p className="font-semibold">{(grupo.montosPorPeriodo.get(periodo) ?? 0) > 0 ? formatearMonto(grupo.montosPorPeriodo.get(periodo) ?? 0, grupo.moneda) : '—'}</p></div>)}</div></article>))}
+                    {(desglosePorCuenta.get(cuenta.id) ?? []).map((grupo) => (<article key={grupo.clave} className="rounded-xl border bg-[var(--surface-2)] p-2 text-xs"><p className="font-semibold">{grupo.establecimiento}</p><p className="text-slate-600">{grupo.descripcion} · {grupo.cuotasPendientes}</p><div className="mt-1 grid grid-cols-2 gap-1">{periodos.map((periodo) => <div key={periodo} className="rounded border bg-[var(--surface)] px-2 py-1"><p className="text-[11px] text-slate-500">{periodo}</p><p className="font-semibold">{(grupo.montosPorPeriodo.get(periodo) ?? 0) > 0 ? formatearMonto(grupo.montosPorPeriodo.get(periodo) ?? 0, grupo.moneda) : '—'}</p></div>)}</div></article>))}
                   </div>
                 )}
               </article>
@@ -700,7 +700,7 @@ export default function FlujoPage() {
       )}
 
       {celdaActiva && (
-        <section className="space-y-2 rounded-2xl border bg-white p-3">
+        <section className="space-y-2 rounded-2xl border bg-[var(--surface)] p-3">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Detalle de {celdaActiva.tipo === 'tarjeta' ? cuentaActiva?.nombre_cuenta ?? 'Cuenta' : `Gasto directo · ${nombresMediosPago.get(celdaActiva.clave) ?? 'Medio de pago'}`} · {celdaActiva.periodo}</h2>
             <button onClick={() => setCeldaActiva(null)} className="rounded-lg border px-2 py-1 text-xs">Cerrar</button>
@@ -737,8 +737,8 @@ function DetalleCuotasLista({
           <p className="text-sm text-slate-600">{cuota.descripcion_cuota ?? 'Sin descripción'} · {etiquetaCuota(cuota.numero_cuota, cuota.total_cuotas)}</p>
           <p className="text-sm text-slate-600">Persona: {cuota.persona_id ? nombresPersonas.get(cuota.persona_id) ?? 'Sin persona' : 'Sin persona'} · Tarjeta: {cuota.tarjeta_fisica_id ? nombresTarjetas.get(cuota.tarjeta_fisica_id) ?? 'Sin tarjeta' : 'Sin tarjeta'}</p>
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
-            <span className={`rounded-full border px-2 py-1 ${BADGE_ORIGEN[cuota.origen_cuota] ?? 'bg-slate-50 text-slate-700 border-slate-200'}`}>origen: {cuota.origen_cuota}</span>
-            <span className={`rounded-full border px-2 py-1 ${BADGE_ESTADO[cuota.estado] ?? 'bg-slate-50 text-slate-700 border-slate-200'}`}>{cuota.estado}</span>
+            <span className={`rounded-full border px-2 py-1 ${BADGE_ORIGEN[cuota.origen_cuota] ?? 'bg-[var(--surface-2)] text-slate-700 border-slate-200'}`}>origen: {cuota.origen_cuota}</span>
+            <span className={`rounded-full border px-2 py-1 ${BADGE_ESTADO[cuota.estado] ?? 'bg-[var(--surface-2)] text-slate-700 border-slate-200'}`}>{cuota.estado}</span>
           </div>
           {cuota.observaciones && <p className="mt-2 text-xs text-slate-500">Obs: {cuota.observaciones}</p>}
         </article>
@@ -762,7 +762,7 @@ function DetalleGastosDirectosLista({ gastos }: { gastos: GastoDirecto[] }) {
 
 function CardTitulo({ titulo, valor, destacado = false }: { titulo: string; valor: string; destacado?: boolean }) {
   return (
-    <article className={`rounded-2xl border p-3 ${destacado ? 'border-emerald-200 bg-emerald-50' : 'bg-white'}`}>
+    <article className={`rounded-2xl border p-3 ${destacado ? 'border-emerald-200 bg-emerald-50' : 'bg-[var(--surface)]'}`}>
       <p className="text-xs uppercase tracking-wide text-slate-600">{titulo}</p>
       <p className="mt-1 text-xl font-semibold">{valor}</p>
     </article>

@@ -11,6 +11,13 @@ html[data-theme='dark-modern'] {
   --surface: #151A23;
   --surface-2: #1D2430;
   --surface-3: #263142;
+  --surface2: var(--surface-2);
+  --surface3: var(--surface-3);
+  --accent2: #38BDF8;
+  --text1: var(--text-primary);
+  --text2: var(--text-secondary);
+  --text3: var(--text-muted);
+  --radius: var(--radius-lg);
   --surface-elevated: #1B2230;
   --text-primary: #F8FAFC;
   --text-secondary: #CBD5E1;
@@ -48,6 +55,13 @@ html[data-theme='light-classic'] {
   --surface: #FFFFFF;
   --surface-2: #F8FAFC;
   --surface-3: #EEF2F7;
+  --surface2: var(--surface-2);
+  --surface3: var(--surface-3);
+  --accent2: #0284C7;
+  --text1: var(--text-primary);
+  --text2: var(--text-secondary);
+  --text3: var(--text-muted);
+  --radius: var(--radius-lg);
   --surface-elevated: #FFFFFF;
   --text-primary: #0F172A;
   --text-secondary: #334155;
@@ -102,6 +116,24 @@ p, li, td, label { color: inherit; }
   .sf-badge-neutral { color: var(--text-secondary); border-color: var(--border-strong); background: var(--surface-3); }
   .sf-badge-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); background: var(--danger-soft); }
   .sf-badge-purple { color: var(--purple); border-color: color-mix(in srgb, var(--purple) 35%, transparent); background: var(--purple-soft); }
+
+  .sf-card { color: var(--text1); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-card); }
+  .sf-list-panel { @apply p-4 sm:p-5; color: var(--text1); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-card); }
+  .sf-metric-card { @apply relative min-h-36 overflow-hidden p-5; color: var(--text1); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-card); transition: transform .18s ease, border-color .18s ease; }
+  .sf-metric-card::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--accent); }
+  .sf-metric-card.is-interactive { cursor: pointer; }
+  .sf-metric-card.is-interactive:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+  .sf-metric-indicator { @apply h-2.5 w-2.5 shrink-0 rounded-full; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+  .sf-progress-row { @apply grid gap-2 p-3; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+  .sf-progress-row-head { @apply flex min-w-0 items-start justify-between gap-3; }
+  .sf-progress-track { width: 100%; height: 5px; overflow: hidden; border-radius: 999px; background: var(--surface-3); }
+  .sf-progress-fill { height: 100%; min-width: 4px; border-radius: inherit; background: var(--progress-color, var(--accent)); }
+  .sf-button { @apply inline-flex min-h-11 items-center justify-center gap-2 px-4 py-2 text-sm font-semibold; color: var(--text2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+  .sf-button:hover { color: var(--text1); background: var(--surface-3); }
+  .sf-input { min-height: 2.75rem; color: var(--text1); border: 1px solid var(--input-border); border-radius: var(--radius-sm); background: var(--input-bg); }
+  .sf-chip { @apply inline-flex min-h-11 items-center justify-center gap-2 px-3 py-2 text-sm font-semibold; color: var(--text2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+  .sf-chip:hover { background: var(--surface-3); }
+  .sf-chip.is-selected { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 }
 
 /* Normaliza las clases históricas de Tailwind sin cambiar la lógica de las pantallas. */
@@ -219,3 +251,24 @@ main :is(.text-emerald-700,.text-emerald-800) { color: var(--accent) !important;
 main :is(.text-rose-700,.text-rose-800) { color: var(--danger) !important; }
 main :is(.text-amber-700,.text-amber-800) { color: var(--warning) !important; }
 main :is(.text-sky-700,.text-sky-800) { color: var(--info) !important; }
+
+
+/* Auditoría 35B-2: los colores históricos claros quedan controlados explícitamente por tema. */
+html[data-theme='dark-modern'] main :is(.bg-white,.bg-slate-50,.bg-gray-50,.bg-slate-100,.bg-gray-100) { color: var(--text1) !important; border-color: var(--border) !important; background: var(--surface-2) !important; }
+html[data-theme='dark-modern'] main :is(.bg-slate-200,.bg-gray-200) { background: var(--surface-3) !important; }
+html[data-theme='dark-modern'] main :is(.ring-emerald-50,.ring-white) { --tw-ring-color: var(--accent-soft) !important; }
+html[data-theme='dark-modern'] main :is(.border-white,.border-white\/80) { border-color: var(--border) !important; }
+html[data-theme='dark-modern'] main :is(.text-white,.text-gray-100,.text-gray-200,.text-slate-100) { color: var(--text1) !important; }
+html[data-theme='dark-modern'] main :is(button,a)[class*='bg-emerald-600'].text-white { color: var(--accent-ink) !important; }
+html[data-theme='dark-modern'] main :is(.bg-emerald-50,.bg-emerald-100) { background: var(--accent-soft) !important; }
+html[data-theme='dark-modern'] main :is(.bg-rose-50,.bg-rose-100) { background: var(--danger-soft) !important; }
+html[data-theme='dark-modern'] main :is(.bg-amber-50,.bg-amber-100) { background: var(--warning-soft) !important; }
+html[data-theme='dark-modern'] main :is(.bg-sky-50,.bg-sky-100) { background: var(--info-soft) !important; }
+
+@media (max-width: 767px) {
+  main table.sf-responsive-table, main .sf-responsive-table tbody, main .sf-responsive-table tr, main .sf-responsive-table td { display: block; width: 100%; }
+  main .sf-responsive-table tr { margin-bottom: .75rem; padding: .75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+  main .sf-responsive-table td { padding: .25rem 0; }
+}
+.sf-bottom-nav :is(a,button).is-primary svg { width: 1.45rem; height: 1.45rem; padding: .2rem; border-radius: 50%; color: var(--accent-ink); background: var(--accent); box-sizing: content-box; box-shadow: 0 6px 18px var(--accent-soft); }
+.sf-bottom-nav :is(a,button).is-primary.is-active { color: var(--accent); background: transparent; }

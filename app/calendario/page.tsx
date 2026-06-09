@@ -100,7 +100,7 @@ function colorBadgeEstado(estado: EstadoCalendario) {
   if (estado === 'confirmado') return 'bg-emerald-100 text-emerald-700';
   if (estado === 'importado') return 'bg-sky-100 text-sky-700';
   if (estado === 'modificado_manual') return 'bg-amber-100 text-amber-700';
-  return 'bg-slate-200 text-slate-700';
+  return 'bg-[var(--surface-3)] text-slate-700';
 }
 
 function estadoLegible(estado: EstadoCalendario) {
@@ -569,7 +569,7 @@ export default function Page() {
         </div>
       )}
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+      <div className="rounded-2xl border border-slate-200 bg-[var(--surface)] p-4 shadow-sm md:p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-lg font-semibold">{tituloFormulario}</h2>
@@ -593,7 +593,7 @@ export default function Page() {
               id="cuenta-tarjeta"
               value={formulario.cuenta_tarjeta_id}
               onChange={(e) => setFormulario((prev) => ({ ...prev, cuenta_tarjeta_id: e.target.value }))}
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-300 bg-[var(--surface)] px-3 py-2 text-sm"
             >
               <option value="">Seleccioná una cuenta *</option>
               {cuentas.map((cuenta) => (
@@ -643,7 +643,7 @@ export default function Page() {
               id="estado-calendario"
               value={formulario.estado_calendario}
               onChange={(e) => setFormulario((prev) => ({ ...prev, estado_calendario: e.target.value as EstadoCalendario }))}
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-300 bg-[var(--surface)] px-3 py-2 text-sm"
             >
               {ESTADOS_VISIBLES.map((estado) => (
                 <option key={estado} value={estado}>
@@ -675,7 +675,7 @@ export default function Page() {
         {errorFormulario && <p className="mt-2 text-sm text-rose-600">{errorFormulario}</p>}
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+      <div className="rounded-2xl border border-slate-200 bg-[var(--surface)] p-4 shadow-sm md:p-5">
         <h2 className="text-lg font-semibold">Crear períodos futuros (estimados)</h2>
         <p className="mb-3 text-xs text-slate-500">
           Usa el día de cierre habitual y días hasta vencimiento de la cuenta seleccionada. No duplica períodos existentes.
@@ -723,7 +723,7 @@ export default function Page() {
         {cargando ? (
           <p className="text-sm text-slate-600">Cargando calendario...</p>
         ) : cuentas.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-600">
+          <p className="rounded-xl border border-dashed border-slate-300 bg-[var(--surface)] p-4 text-sm text-slate-600">
             No hay cuentas de tarjeta registradas.
           </p>
         ) : (
@@ -740,7 +740,7 @@ export default function Page() {
                   className={`whitespace-nowrap rounded-xl border px-3 py-2 text-sm ${
                     cuenta.id === cuentaSeleccionadaId
                       ? 'border-emerald-600 bg-emerald-50 text-emerald-700'
-                      : 'border-slate-300 bg-white text-slate-700'
+                      : 'border-slate-300 bg-[var(--surface)] text-slate-700'
                   }`}
                 >
                   {cuenta.nombre_cuenta}
@@ -748,9 +748,9 @@ export default function Page() {
               ))}
             </div>
 
-            <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white md:block">
+            <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-[var(--surface)] md:block">
               <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
+                <thead className="bg-[var(--surface-2)] text-xs uppercase tracking-wide text-slate-600">
                   <tr>
                     <th className="px-3 py-2">Período</th>
                     <th className="px-3 py-2">Cierre</th>
@@ -806,7 +806,7 @@ export default function Page() {
 
             <div className="space-y-2 md:hidden">
               {calendariosCuenta.map((item) => (
-                <article key={item.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <article key={item.id} className="rounded-2xl border border-slate-200 bg-[var(--surface)] p-4 shadow-sm">
                   <div className="mb-2 flex items-center justify-between">
                     <h3 className="text-base font-semibold text-slate-900">{item.periodo_resumen}</h3>
                     <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${colorBadgeEstado(item.estado_calendario)}`}>
@@ -848,7 +848,7 @@ export default function Page() {
             </div>
 
             {calendariosCuenta.length === 0 && (
-              <p className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-600">
+              <p className="rounded-xl border border-dashed border-slate-300 bg-[var(--surface)] p-4 text-sm text-slate-600">
                 No hay períodos cargados para esta cuenta.
               </p>
             )}

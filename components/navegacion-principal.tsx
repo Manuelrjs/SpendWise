@@ -26,7 +26,7 @@ const gruposEnlaces: GrupoEnlaces[] = [
     { href: '/configuracion/mantenimiento', etiqueta: 'Mantenimiento', icono: 'ajustes' },
   ] },
 ];
-const enlacesPrincipales = [gruposEnlaces[0].enlaces[0], gruposEnlaces[0].enlaces[1], gruposEnlaces[0].enlaces[2], gruposEnlaces[0].enlaces[3]];
+const enlacesPrincipales = [gruposEnlaces[0].enlaces[0], gruposEnlaces[0].enlaces[2], gruposEnlaces[0].enlaces[1], gruposEnlaces[0].enlaces[3]];
 const enlacesMas = [gruposEnlaces[0].enlaces[4], ...gruposEnlaces[1].enlaces, ...gruposEnlaces[2].enlaces];
 
 function Icono({ nombre }: { nombre: IconoNombre }) {
@@ -69,7 +69,7 @@ export function NavegacionPrincipal() {
     </aside>
 
     <header className="sf-mobile-header"><div className="sf-brand"><LogoMarca /><div><p>SpendFlow</p><span>{nombreGrupo}</span></div></div><Link href="/configuracion/grupo" className="sf-mobile-group" aria-label="Abrir grupo activo">Grupo</Link></header>
-    <nav className="sf-bottom-nav" aria-label="Navegación móvil"><ul>{enlacesPrincipales.map((enlace) => <li key={enlace.href}><Link href={enlace.href} className={estaActivo(enlace.href) ? 'is-active' : ''}><Icono nombre={enlace.icono} /><span>{enlace.etiqueta === 'Nuevo gasto' ? 'Nuevo' : enlace.etiqueta === 'Flujo mensual' ? 'Flujo' : enlace.etiqueta}</span></Link></li>)}<li><button type="button" className={masAbierto || enlacesMas.some((enlace) => estaActivo(enlace.href)) ? 'is-active' : ''} onClick={() => setMasAbierto(true)} aria-haspopup="dialog" aria-expanded={masAbierto}><Icono nombre="mas" /><span>Más</span></button></li></ul></nav>
+    <nav className="sf-bottom-nav" aria-label="Navegación móvil"><ul>{enlacesPrincipales.map((enlace) => <li key={enlace.href}><Link href={enlace.href} className={`${estaActivo(enlace.href) ? 'is-active' : ''} ${enlace.href === '/gastos/nuevo' ? 'is-primary' : ''}`}><Icono nombre={enlace.icono} /><span>{enlace.etiqueta === 'Nuevo gasto' ? 'Nuevo' : enlace.etiqueta === 'Flujo mensual' ? 'Flujo' : enlace.etiqueta}</span></Link></li>)}<li><button type="button" className={masAbierto || enlacesMas.some((enlace) => estaActivo(enlace.href)) ? 'is-active' : ''} onClick={() => setMasAbierto(true)} aria-haspopup="dialog" aria-expanded={masAbierto}><Icono nombre="mas" /><span>Más</span></button></li></ul></nav>
 
     {masAbierto ? <div className="sf-drawer-backdrop" onClick={() => setMasAbierto(false)}><section className="sf-drawer" role="dialog" aria-modal="true" aria-label="Más opciones" onClick={(evento) => evento.stopPropagation()}><header className="sf-drawer-header"><div><p>Más opciones</p><span>{nombreGrupo} · {email}</span></div><button type="button" className="sf-drawer-close" onClick={() => setMasAbierto(false)} aria-label="Cerrar menú">×</button></header><div className="sf-drawer-body"><nav className="sf-drawer-grid">{enlacesMas.map((enlace) => <Link key={enlace.href} href={enlace.href} className={`sf-drawer-link ${estaActivo(enlace.href) ? 'is-active' : ''}`}><Icono nombre={enlace.icono} /><span>{enlace.etiqueta}</span></Link>)}</nav><div className="sf-drawer-actions"><SelectorTema /><button type="button" onClick={cerrarSesion} className="sf-drawer-signout">Cerrar sesión</button></div></div></section></div> : null}
   </>;

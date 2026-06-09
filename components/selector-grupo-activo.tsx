@@ -80,7 +80,7 @@ export function SelectorGrupoActivo({ mostrarTitulo = false, onError }: Selector
         value={perfil?.grupo_id ?? ''}
         onChange={(evento) => void cambiarGrupo(evento.target.value)}
         disabled={cambiando}
-        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 font-semibold text-slate-800 shadow-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 disabled:opacity-60"
+        className="sf-input w-full px-3 py-2.5 font-semibold outline-none disabled:opacity-60"
       >
         {membresias.map((membresia) => <option key={membresia.grupo_id} value={membresia.grupo_id}>{membresia.nombre}</option>)}
       </select>
